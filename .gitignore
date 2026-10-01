@@ -46,3 +46,7 @@ npm-debug.log*
 coverage/
 htmlcov/
 .coverage
+
+# Temporary Scripts
+push_to_github.bat
+
