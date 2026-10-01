@@ -18,8 +18,13 @@ build/
 
 # Environment
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
 
 # IDE
 .vscode/
