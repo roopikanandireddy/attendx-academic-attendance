@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import Column, String, Date, DateTime, ForeignKey, UniqueConstraint
-from sqlalchemy.orm import relationship
+from datetime import date as date_type, datetime, timezone
+from sqlalchemy import Date, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 
@@ -12,13 +12,13 @@ def utcnow():
 class Attendance(Base):
     __tablename__ = "attendance"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    student_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    subject_id = Column(String, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False)
-    attendance_date = Column(Date, nullable=False)
-    status = Column(String(10), nullable=False)  # 'present' or 'absent'
-    marked_by = Column(String, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    student_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    subject_id: Mapped[str] = mapped_column(String, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False)
+    attendance_date: Mapped[date_type] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(10), nullable=False)  # 'present' or 'absent'
+    marked_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("student_id", "subject_id", "attendance_date", name="uq_attendance_record"),

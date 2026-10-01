@@ -16,6 +16,7 @@ from app.models.user import User
 from app.models.subject import Subject
 from app.models.student_subject import StudentSubject
 from app.models.attendance import Attendance
+from app.models.lecturer_subject import LecturerSubject
 
 
 def seed_database():
@@ -27,7 +28,41 @@ def seed_database():
         # Check if already seeded
         existing_admin = db.query(User).filter(User.email == "admin@attendx.com").first()
         if existing_admin:
-            print("Database already contains seed data. Skipping creation.")
+            existing_lec = db.query(User).filter(User.email == "dr.alan@lecturer.com").first()
+            if not existing_lec:
+                existing_lec = User(
+                    email="dr.alan@lecturer.com",
+                    full_name="Dr. Alan Turing",
+                    password_hash=hash_password("LecturerPassword123!"),
+                    role="lecturer",
+                    employee_id="EMP-CS-001",
+                    department="Computer Science",
+                    is_active=True,
+                )
+                db.add(existing_lec)
+                db.commit()
+                db.refresh(existing_lec)
+                print("Created missing sample lecturer: dr.alan@lecturer.com")
+
+            # Ensure teaching assignments for dr.alan@lecturer.com
+            iai = db.query(Subject).filter(Subject.code == "IAI").first()
+            se = db.query(Subject).filter(Subject.code == "SE").first()
+            if existing_lec and iai:
+                if not db.query(LecturerSubject).filter(LecturerSubject.lecturer_id == existing_lec.id, LecturerSubject.subject_id == iai.id).first():
+                    db.add(LecturerSubject(lecturer_id=existing_lec.id, subject_id=iai.id))
+            if existing_lec and se:
+                if not db.query(LecturerSubject).filter(LecturerSubject.lecturer_id == existing_lec.id, LecturerSubject.subject_id == se.id).first():
+                    db.add(LecturerSubject(lecturer_id=existing_lec.id, subject_id=se.id))
+
+            # Ensure teaching assignment for Dr. Katherine Johnson if exists
+            kj_lec = db.query(User).filter(User.email == "katherine.johnson@attendx.com").first()
+            isc = db.query(Subject).filter(Subject.code == "ISC").first()
+            if kj_lec and isc:
+                if not db.query(LecturerSubject).filter(LecturerSubject.lecturer_id == kj_lec.id, LecturerSubject.subject_id == isc.id).first():
+                    db.add(LecturerSubject(lecturer_id=kj_lec.id, subject_id=isc.id))
+
+            db.commit()
+            print("Database already contains seed data. Teaching assignments synchronized.")
             return
 
         print("Seeding database with initial data...")
@@ -43,6 +78,21 @@ def seed_database():
         db.add(admin)
         db.flush()
         print(f"Created Admin: {admin.email}")
+
+        # 1b. Create Sample Lecturer
+        sample_lecturer = User(
+            email="dr.alan@lecturer.com",
+            full_name="Dr. Alan Turing",
+            password_hash=hash_password("LecturerPassword123!"),
+            role="lecturer",
+            employee_id="EMP-CS-001",
+            department="Computer Science",
+            is_active=True,
+        )
+        db.add(sample_lecturer)
+        db.flush()
+        print(f"Created Lecturer: {sample_lecturer.email}")
+
 
         # 2. Create Sample Students
         students_data = [
@@ -112,12 +162,14 @@ def seed_database():
         print(f"Created {len(created_students)} students.")
 
         # 3. Create Sample Subjects
+        # 3. Create Sample Subjects (AttendX 6-Subject Catalog)
         subjects_data = [
-            {"name": "Data Structures & Algorithms", "code": "CS301", "department": "Computer Science", "year": 3, "semester": 5},
-            {"name": "Database Management Systems", "code": "CS302", "department": "Computer Science", "year": 3, "semester": 5},
-            {"name": "Computer Networks", "code": "CS303", "department": "Computer Science", "year": 3, "semester": 5},
-            {"name": "Operating Systems", "code": "CS304", "department": "Computer Science", "year": 3, "semester": 5},
-            {"name": "Digital Electronics", "code": "EC201", "department": "Electronics", "year": 2, "semester": 3},
+            {"name": "Introduction to Artificial Intelligence", "code": "IAI", "department": "Computer Science", "year": 3, "semester": 5},
+            {"name": "Software Engineering", "code": "SE", "department": "Computer Science", "year": 3, "semester": 5},
+            {"name": "Intelligent Control Systems", "code": "ISC", "department": "Computer Science", "year": 3, "semester": 5},
+            {"name": "Business Economics & Financial Analysis", "code": "BEFA", "department": "Computer Science", "year": 3, "semester": 5},
+            {"name": "Environmental Science", "code": "ES", "department": "Computer Science", "year": 3, "semester": 5},
+            {"name": "Advanced Engineering Laboratory-3", "code": "AE-3 LAB", "department": "Computer Science", "year": 3, "semester": 5},
         ]
 
         created_subjects = []
@@ -136,7 +188,7 @@ def seed_database():
         print(f"Created {len(created_subjects)} subjects.")
 
         # 4. Enroll Students
-        # Enrol CS students (John, Jane, Alex) in CS subjects
+        # Enrol CS students (John, Jane, Alex) in core CS subjects (IAI, SE, ISC, BEFA)
         cs_subjects = created_subjects[:4]
         cs_students = created_students[:3]
         for s in cs_students:
@@ -144,7 +196,7 @@ def seed_database():
                 enrollment = StudentSubject(student_id=s.id, subject_id=sub.id)
                 db.add(enrollment)
 
-        # Enrol Sarah in EC201
+        # Enrol Sarah in ES
         db.add(StudentSubject(student_id=created_students[3].id, subject_id=created_subjects[4].id))
         db.flush()
         print("Enrolled students in subjects.")
@@ -195,6 +247,63 @@ def seed_database():
 
         db.commit()
         print(f"Generated {attendance_count} attendance records.")
+
+        # Seed initial sample notifications
+        from app.models.notification import Notification
+        db.add(Notification(
+            user_id=created_students[0].id, # John Doe
+            title="Welcome to AttendX",
+            message="Your AttendX student portal is ready to use.",
+            type="system",
+            related_entity_type="system",
+            related_entity_id="welcome",
+            is_read=True
+        ))
+        db.add(Notification(
+            user_id=created_students[0].id,
+            title="Subject Enrollment Successful",
+            message="You successfully enrolled in 6 subjects.",
+            type="enrollment",
+            related_entity_type="enrollment",
+            is_read=False
+        ))
+        db.add(Notification(
+            user_id=created_students[0].id,
+            title="Attendance Updated",
+            message="Your attendance for IAI was marked Present.",
+            type="attendance",
+            related_entity_type="attendance",
+            is_read=False
+        ))
+
+        db.add(Notification(
+            user_id=created_students[2].id, # Alex Kumar
+            title="Welcome to AttendX",
+            message="Your AttendX student portal is ready to use.",
+            type="system",
+            related_entity_type="system",
+            related_entity_id="welcome",
+            is_read=True
+        ))
+        db.add(Notification(
+            user_id=created_students[2].id,
+            title="Low Attendance Warning",
+            message="Your attendance in Software Engineering is 60%, which is below the 75% threshold.",
+            type="low_attendance",
+            related_entity_type="low_attendance",
+            is_read=False
+        ))
+        db.add(Notification(
+            user_id=created_students[2].id,
+            title="Attendance Updated",
+            message="Your attendance for SE was marked Absent.",
+            type="attendance",
+            related_entity_type="attendance",
+            is_read=False
+        ))
+        db.commit()
+        print("Generated initial sample notifications for test accounts.")
+
         print("\nDatabase seeded successfully!")
         print("--------------------------------------------------")
         print("Admin Login:")
@@ -206,6 +315,9 @@ def seed_database():
         print("\nStudent Login (Alex Kumar - Low Attendance Demo):")
         print("  Email:    alex.kumar@student.com")
         print("  Password: StudentPassword123!")
+        print("\nLecturer Login (Dr. Alan Turing):")
+        print("  Email:    dr.alan@lecturer.com")
+        print("  Password: LecturerPassword123!")
         print("--------------------------------------------------")
 
     except Exception as e:

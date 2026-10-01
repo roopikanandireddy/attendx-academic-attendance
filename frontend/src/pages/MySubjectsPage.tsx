@@ -4,12 +4,14 @@ import type { SubjectStats } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorState from '../components/ErrorState';
-import { BookOpen, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import EnrollSubjectsModal from '../components/EnrollSubjectsModal';
+import { BookOpen, BookPlus, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
 
 export default function MySubjectsPage() {
   const [subjects, setSubjects] = useState<SubjectStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [enrollModalOpen, setEnrollModalOpen] = useState(false);
 
   const fetchData = async () => {
     setLoading(true); setError('');
@@ -25,7 +27,8 @@ export default function MySubjectsPage() {
 
   useEffect(() => { fetchData(); }, []);
 
-  const getColor = (pct: number) => {
+  const getColor = (pct: number, total: number = 1) => {
+    if (total === 0) return { bg: 'bg-surface-300', text: 'text-surface-500', badge: 'badge-secondary' };
     if (pct >= 75) return { bg: 'bg-emerald-500', text: 'text-success', badge: 'badge-success' };
     if (pct >= 60) return { bg: 'bg-amber-500', text: 'text-warning', badge: 'badge-warning' };
     return { bg: 'bg-red-500', text: 'text-danger', badge: 'badge-danger' };
@@ -36,18 +39,39 @@ export default function MySubjectsPage() {
 
   return (
     <div className="space-y-6 fade-in">
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900">My Subjects</h1>
-        <p className="text-surface-500 text-sm mt-0.5">Your enrolled subjects and attendance breakdown</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-surface-900">My Subjects</h1>
+          <p className="text-surface-500 text-sm mt-0.5">Your enrolled subjects and attendance breakdown</p>
+        </div>
+        <button
+          onClick={() => setEnrollModalOpen(true)}
+          className="btn btn-primary flex items-center gap-2 self-start sm:self-auto shadow-sm"
+        >
+          <BookPlus className="w-4 h-4" />
+          Enroll Subjects
+        </button>
       </div>
 
       {subjects.length === 0 ? (
-        <EmptyState title="No subjects" description="You haven't been enrolled in any subjects yet."
-          icon={<BookOpen className="w-8 h-8 text-surface-400" />} />
+        <EmptyState
+          title="No subjects"
+          description="You haven't been enrolled in any subjects yet."
+          icon={<BookOpen className="w-8 h-8 text-surface-400" />}
+          action={
+            <button
+              onClick={() => setEnrollModalOpen(true)}
+              className="btn btn-primary mt-4 inline-flex items-center gap-2"
+            >
+              <BookPlus className="w-4 h-4" />
+              Enroll Subjects
+            </button>
+          }
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {subjects.map((sub, i) => {
-            const color = getColor(sub.percentage);
+            const color = getColor(sub.percentage, sub.total_classes);
             return (
               <div key={sub.subject_id} className="card card-hover fade-in" style={{ animationDelay: `${i * 0.05}s` }}>
                 <div className="flex items-start justify-between mb-3">
@@ -79,13 +103,19 @@ export default function MySubjectsPage() {
                     <XCircle className="w-3.5 h-3.5 text-danger" />
                     <span>{sub.absent} absent</span>
                   </div>
-                  <span>{sub.total_classes} total</span>
+                  <span>{sub.present} / {sub.total_classes} classes</span>
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      <EnrollSubjectsModal
+        isOpen={enrollModalOpen}
+        onClose={() => setEnrollModalOpen(false)}
+        onEnrolled={fetchData}
+      />
     </div>
   );
 }

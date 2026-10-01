@@ -13,7 +13,13 @@ export default function LoginPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   if (user) {
-    return <Navigate to={user.role === 'admin' ? '/admin/dashboard' : '/dashboard'} replace />;
+    if (user.role === 'admin') {
+      return <Navigate to="/admin/dashboard" replace />;
+    }
+    if (user.role === 'lecturer') {
+      return <Navigate to="/lecturer/dashboard" replace />;
+    }
+    return <Navigate to="/dashboard" replace />;
   }
 
   const validate = () => {

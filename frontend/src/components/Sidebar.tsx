@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   History,
   BarChart3,
+  Bell,
   User,
   LogOut,
   X,
@@ -32,6 +33,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     { to: '/my-subjects', label: 'My Subjects', icon: BookOpen },
     { to: '/my-attendance', label: 'Attendance', icon: ClipboardCheck },
     { to: '/attendance-history', label: 'History', icon: History },
+    { to: '/notifications', label: 'Notifications', icon: Bell },
     { to: '/profile', label: 'Profile', icon: User },
   ];
 

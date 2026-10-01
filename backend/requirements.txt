@@ -9,3 +9,6 @@ pydantic[email]==2.6.1
 pydantic-settings==2.1.0
 python-dotenv==1.0.1
 python-multipart==0.0.9
+httpx>=0.23.0,<0.28.0
+
+

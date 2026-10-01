@@ -49,7 +49,7 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ) -> User:
     payload = decode_token(token)
-    user_id: str = payload.get("sub")
+    user_id: Optional[str] = payload.get("sub")
     if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -61,6 +61,11 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is disabled. Please contact an administrator.",
+        )
     return user
 
 
@@ -71,3 +76,33 @@ async def get_current_admin(current_user: User = Depends(get_current_user)) -> U
             detail="Admin access required",
         )
     return current_user
+
+
+async def get_current_lecturer(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != "lecturer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Lecturer access required",
+        )
+    if not current_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Lecturer account is disabled. Please contact an administrator.",
+        )
+    return current_user
+
+
+async def get_current_student(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Student access required",
+        )
+    if not current_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Student account is disabled. Please contact an administrator.",
+        )
+    return current_user
+
+

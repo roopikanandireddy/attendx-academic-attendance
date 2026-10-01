@@ -11,16 +11,19 @@ import {
   TrendingUp,
   AlertTriangle,
   BookOpen,
+  BookPlus,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
+import EnrollSubjectsModal from '../components/EnrollSubjectsModal';
 
 export default function StudentDashboard() {
   const { user } = useAuth();
   const [data, setData] = useState<StudentDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [enrollModalOpen, setEnrollModalOpen] = useState(false);
 
   const fetchDashboard = async () => {
     setLoading(true);
@@ -48,13 +51,15 @@ export default function StudentDashboard() {
     return 'Good evening';
   };
 
-  const getPercentageColor = (pct: number) => {
+  const getPercentageColor = (pct: number, total: number = 1) => {
+    if (total === 0) return 'text-surface-500';
     if (pct >= 75) return 'text-success';
     if (pct >= 60) return 'text-warning';
     return 'text-danger';
   };
 
-  const getBarColor = (pct: number) => {
+  const getBarColor = (pct: number, total: number = 1) => {
+    if (total === 0) return '#cbd5e1';
     if (pct >= 75) return '#10b981';
     if (pct >= 60) return '#f59e0b';
     return '#ef4444';
@@ -70,11 +75,20 @@ export default function StudentDashboard() {
   return (
     <div className="space-y-6 fade-in">
       {/* Greeting */}
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900">
-          {getGreeting()}, {user?.full_name?.split(' ')[0]} 👋
-        </h1>
-        <p className="text-surface-500 text-sm mt-1">Here's your attendance overview</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-surface-900">
+            {getGreeting()}, {user?.full_name?.split(' ')[0]} 👋
+          </h1>
+          <p className="text-surface-500 text-sm mt-1">Here's your attendance overview</p>
+        </div>
+        <button
+          onClick={() => setEnrollModalOpen(true)}
+          className="btn btn-primary flex items-center gap-2 self-start sm:self-auto shadow-sm"
+        >
+          <BookPlus className="w-4 h-4" />
+          Enroll Subjects
+        </button>
       </div>
 
       {/* Stats Cards */}
@@ -96,12 +110,28 @@ export default function StudentDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Subject Attendance Chart */}
         <div className="card">
-          <h3 className="text-base font-semibold text-surface-800 mb-4 flex items-center gap-2">
-            <BookOpen className="w-4 h-4 text-primary-600" />
-            Subject Attendance
-          </h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-surface-800 flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-primary-600" />
+              Subject Attendance
+            </h3>
+            {data.subjects.length > 0 && (
+              <span className="text-xs text-surface-400 font-medium">
+                {data.subjects.length} Enrolled
+              </span>
+            )}
+          </div>
           {data.subjects.length === 0 ? (
-            <p className="text-sm text-surface-400 py-8 text-center">No subjects enrolled yet</p>
+            <div className="py-8 text-center">
+              <p className="text-sm text-surface-400 mb-3">No subjects enrolled yet</p>
+              <button
+                onClick={() => setEnrollModalOpen(true)}
+                className="btn btn-primary text-xs px-3 py-1.5 inline-flex items-center gap-1.5"
+              >
+                <BookPlus className="w-3.5 h-3.5" />
+                Enroll Subjects
+              </button>
+            </div>
           ) : (
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={data.subjects} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
@@ -110,11 +140,14 @@ export default function StudentDashboard() {
                 <YAxis domain={[0, 100]} tick={{ fontSize: 12, fill: '#64748b' }} />
                 <Tooltip
                   contentStyle={{ borderRadius: '0.5rem', border: '1px solid #e2e8f0', fontSize: '0.8125rem' }}
-                  formatter={(value: any) => [`${value}%`, 'Attendance']}
+                  formatter={(value: any, _name: any, item: any) => [
+                    `${value}% (${item?.payload?.present ?? 0} / ${item?.payload?.total_classes ?? 0} classes)`,
+                    'Attendance',
+                  ]}
                 />
                 <Bar dataKey="percentage" radius={[4, 4, 0, 0]} maxBarSize={40}>
                   {data.subjects.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={getBarColor(entry.percentage)} />
+                    <Cell key={`cell-${index}`} fill={getBarColor(entry.percentage, entry.total_classes)} />
                   ))}
                 </Bar>
               </BarChart>
@@ -126,7 +159,16 @@ export default function StudentDashboard() {
         <div className="card">
           <h3 className="text-base font-semibold text-surface-800 mb-4">Subject-wise Breakdown</h3>
           {data.subjects.length === 0 ? (
-            <p className="text-sm text-surface-400 py-8 text-center">No subjects to show</p>
+            <div className="py-8 text-center">
+              <p className="text-sm text-surface-400 mb-3">No subjects to show</p>
+              <button
+                onClick={() => setEnrollModalOpen(true)}
+                className="btn btn-primary text-xs px-3 py-1.5 inline-flex items-center gap-1.5"
+              >
+                <BookPlus className="w-3.5 h-3.5" />
+                Enroll Subjects
+              </button>
+            </div>
           ) : (
             <div className="space-y-4">
               {data.subjects.map((sub) => (
@@ -136,7 +178,7 @@ export default function StudentDashboard() {
                       <span className="text-sm font-medium text-surface-800 truncate">
                         {sub.subject_code} — {sub.subject_name}
                       </span>
-                      <span className={`text-sm font-semibold ${getPercentageColor(sub.percentage)}`}>
+                      <span className={`text-sm font-semibold ${getPercentageColor(sub.percentage, sub.total_classes)}`}>
                         {sub.percentage}%
                       </span>
                     </div>
@@ -145,12 +187,12 @@ export default function StudentDashboard() {
                         className="progress-fill"
                         style={{
                           width: `${sub.percentage}%`,
-                          background: getBarColor(sub.percentage),
+                          background: getBarColor(sub.percentage, sub.total_classes),
                         }}
                       />
                     </div>
                     <p className="text-xs text-surface-400 mt-1">
-                      {sub.present}/{sub.total_classes} classes attended
+                      {sub.present} / {sub.total_classes} classes
                     </p>
                   </div>
                 </div>
@@ -215,6 +257,12 @@ export default function StudentDashboard() {
           )}
         </div>
       </div>
+
+      <EnrollSubjectsModal
+        isOpen={enrollModalOpen}
+        onClose={() => setEnrollModalOpen(false)}
+        onEnrolled={fetchDashboard}
+      />
     </div>
   );
 }

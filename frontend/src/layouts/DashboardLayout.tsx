@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Sidebar from '../components/Sidebar';
-import { Menu, Bell } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import NotificationBell from '../components/NotificationBell';
 
 export default function DashboardLayout() {
   const { user, loading } = useAuth();
@@ -40,9 +41,7 @@ export default function DashboardLayout() {
             <div className="flex-1" />
 
             <div className="flex items-center gap-3">
-              <button className="p-2 rounded-lg hover:bg-surface-100 text-surface-500 relative" aria-label="Notifications">
-                <Bell className="w-5 h-5" />
-              </button>
+              <NotificationBell />
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white text-sm font-semibold">
                 {user.full_name.charAt(0).toUpperCase()}
               </div>

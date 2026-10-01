@@ -68,8 +68,10 @@ export default function ProfilePage() {
         </div>
         <h2 className="text-xl font-semibold text-surface-900">{user?.full_name}</h2>
         <p className="text-surface-500 text-sm mt-0.5">{user?.email}</p>
-        <span className={`badge mt-2 ${user?.role === 'admin' ? 'badge-info' : 'badge-success'}`}>
-          {user?.role === 'admin' ? 'Administrator' : 'Student'}
+        <span className={`badge mt-2 ${
+          user?.role === 'admin' ? 'badge-info' : user?.role === 'lecturer' ? 'badge-primary' : 'badge-success'
+        }`}>
+          {user?.role === 'admin' ? 'Administrator' : user?.role === 'lecturer' ? 'Lecturer' : 'Student'}
         </span>
       </div>
 
@@ -93,9 +95,10 @@ export default function ProfilePage() {
         {infoRow(<User className="w-4 h-4 text-surface-500" />, 'Full Name', user?.full_name, true, 'full_name')}
         {infoRow(<Mail className="w-4 h-4 text-surface-500" />, 'Email', user?.email)}
         {user?.student_id && infoRow(<Hash className="w-4 h-4 text-surface-500" />, 'Student ID', user.student_id)}
+        {user?.employee_id && infoRow(<Hash className="w-4 h-4 text-surface-500" />, 'Employee ID', user.employee_id)}
         {infoRow(<Building className="w-4 h-4 text-surface-500" />, 'Department', user?.department, true, 'department')}
-        {infoRow(<Calendar className="w-4 h-4 text-surface-500" />, 'Year', user?.year?.toString(), true, 'year')}
-        {infoRow(<BookOpen className="w-4 h-4 text-surface-500" />, 'Section', user?.section, true, 'section')}
+        {user?.role === 'student' && infoRow(<Calendar className="w-4 h-4 text-surface-500" />, 'Year', user?.year?.toString(), true, 'year')}
+        {user?.role === 'student' && infoRow(<BookOpen className="w-4 h-4 text-surface-500" />, 'Section', user?.section, true, 'section')}
       </div>
 
       <div className="card">

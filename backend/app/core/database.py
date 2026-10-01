@@ -1,25 +1,39 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from app.core.config import get_settings
 
 settings = get_settings()
 
-# Use DATABASE_URL if available, otherwise construct from SUPABASE settings
+from pathlib import Path
+
+# Use DATABASE_URL if available, otherwise construct from SUPABASE settings or use backend/attendx_dev.db
 database_url = settings.DATABASE_URL
 if not database_url:
-    database_url = "sqlite:///./attendx_dev.db"
+    backend_dir = Path(__file__).resolve().parent.parent.parent
+    db_file = backend_dir / "attendx_dev.db"
+    database_url = f"sqlite:///{db_file.as_posix()}"
+
 
 if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 
 if database_url.startswith("sqlite"):
     engine = create_engine(database_url, connect_args={"check_same_thread": False})
+
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 else:
     engine = create_engine(database_url, pool_pre_ping=True)
 
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+
+
+class Base(DeclarativeBase):
+    pass
 
 
 def get_db():

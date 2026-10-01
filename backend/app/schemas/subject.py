@@ -75,3 +75,114 @@ class EnrollmentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class BatchEnrollmentRequest(BaseModel):
+    subject_ids: list[str]
+
+
+class BatchEnrollmentResponse(BaseModel):
+    message: str
+    enrolled_count: int
+    enrolled_subject_ids: list[str]
+
+
+class SubjectSummaryMetrics(BaseModel):
+    total_subjects: int
+    assigned_subjects: int
+    unassigned_subjects: int
+    total_enrollments: int
+
+
+class AssignedLecturerInfo(BaseModel):
+    id: str
+    full_name: str
+    email: str
+    employee_id: Optional[str] = None
+    department: Optional[str] = None
+    assignment_id: Optional[str] = None
+
+
+class SubjectListItem(BaseModel):
+    id: str
+    name: str
+    code: str
+    department: str
+    year: int
+    semester: int
+    assigned_lecturers: list[AssignedLecturerInfo] = []
+    assigned_lecturers_count: int = 0
+    enrolled_students_count: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SubjectListResponse(BaseModel):
+    items: list[SubjectListItem]
+    total: int
+    page: int
+    limit: int
+    pages: int
+
+
+class EnrolledStudentInfo(BaseModel):
+    id: str
+    full_name: str
+    email: str
+    student_id: Optional[str] = None
+    department: Optional[str] = None
+    year: Optional[int] = None
+    section: Optional[str] = None
+    enrollment_id: str
+
+
+class SubjectDetailResponse(BaseModel):
+    id: str
+    name: str
+    code: str
+    department: str
+    year: int
+    semester: int
+    assigned_lecturers: list[AssignedLecturerInfo] = []
+    assigned_lecturers_count: int = 0
+    enrolled_students: list[EnrolledStudentInfo] = []
+    enrolled_students_count: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LecturerAssignmentCreate(BaseModel):
+    lecturer_id: str
+    subject_id: str
+
+
+class LecturerAssignmentResponse(BaseModel):
+    id: str
+    lecturer_id: str
+    subject_id: str
+    lecturer_name: str
+    lecturer_email: str
+    lecturer_employee_id: Optional[str] = None
+    lecturer_department: Optional[str] = None
+    subject_name: str
+    subject_code: str
+    subject_department: str
+    subject_year: int
+    subject_semester: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AssignmentSummaryMetrics(BaseModel):
+    total_assignments: int
+    assigned_lecturers: int
+    assigned_subjects: int
+    unassigned_subjects: int
+
+

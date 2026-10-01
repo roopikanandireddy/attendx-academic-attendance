@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_MINUTES: int = 1440
     FRONTEND_URL: str = "http://localhost:5173"
+    ALLOWED_ORIGINS: str = ""
 
     class Config:
         env_file = ".env"

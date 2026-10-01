@@ -49,6 +49,9 @@ def register(data: UserRegister, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
+    from app.services.notification_service import create_welcome_notification
+    create_welcome_notification(db=db, user_id=user.id)
+
     token = create_access_token({"sub": user.id, "role": user.role})
     return TokenResponse(
         access_token=token,
@@ -64,6 +67,12 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is disabled. Please contact an administrator.",
         )
 
     token = create_access_token({"sub": user.id, "role": user.role})

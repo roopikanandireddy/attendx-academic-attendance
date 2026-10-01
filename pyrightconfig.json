@@ -1,0 +1,14 @@
+{
+  "include": [
+    "backend/app"
+  ],
+  "exclude": [
+    "backend/.venv",
+    "**/node_modules"
+  ],
+  "extraPaths": [
+    "backend"
+  ],
+  "venvPath": "backend",
+  "venv": ".venv"
+}
