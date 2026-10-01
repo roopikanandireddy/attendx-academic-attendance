@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Users table
 CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
     full_name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE users (
 
 -- Subjects table
 CREATE TABLE subjects (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
     name VARCHAR(255) NOT NULL,
     code VARCHAR(50) NOT NULL UNIQUE,
     department VARCHAR(100) NOT NULL,
@@ -34,38 +34,38 @@ CREATE TABLE subjects (
 
 -- Student-Subject enrollment
 CREATE TABLE student_subjects (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    student_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    subject_id UUID NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    student_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject_id VARCHAR(36) NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(student_id, subject_id)
 );
 
 -- Lecturer-Subject teaching assignment
 CREATE TABLE lecturer_subjects (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    lecturer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    subject_id UUID NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    lecturer_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject_id VARCHAR(36) NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(lecturer_id, subject_id)
 );
 
 -- Attendance records
 CREATE TABLE attendance (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    student_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    subject_id UUID NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    student_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject_id VARCHAR(36) NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
     attendance_date DATE NOT NULL,
     status VARCHAR(10) NOT NULL CHECK (status IN ('present', 'absent')),
-    marked_by UUID NOT NULL REFERENCES users(id),
+    marked_by VARCHAR(36) NOT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(student_id, subject_id, attendance_date)
 );
 
 -- Notifications table
 CREATE TABLE notifications (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
     message TEXT NOT NULL,
     type VARCHAR(50) NOT NULL CHECK (type IN ('attendance', 'low_attendance', 'enrollment', 'system', 'reminder')),

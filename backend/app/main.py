@@ -28,7 +28,7 @@ app = FastAPI(
 )
 
 # CORS
-cors_origins = [
+raw_origins = [
     settings.FRONTEND_URL,
     "http://localhost:5173",
     "http://localhost:3000",
@@ -36,8 +36,15 @@ cors_origins = [
 ]
 if hasattr(settings, "ALLOWED_ORIGINS") and settings.ALLOWED_ORIGINS:
     extra = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
-    cors_origins.extend(extra)
-origins = list(dict.fromkeys([o for o in cors_origins if o]))
+    raw_origins.extend(extra)
+
+# Sanitize origins: strip whitespace and trailing slashes (e.g. 'https://attendx.onrender.com/' -> 'https://attendx.onrender.com')
+origins = []
+for o in raw_origins:
+    if o and isinstance(o, str):
+        cleaned = o.strip().rstrip("/")
+        if cleaned and cleaned not in origins:
+            origins.append(cleaned)
 
 app.add_middleware(
     CORSMiddleware,

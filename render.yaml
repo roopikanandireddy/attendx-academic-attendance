@@ -2,7 +2,7 @@ services:
   # Backend API service (FastAPI)
   - type: web
     name: attendx-api
-    env: python
+    runtime: python
     region: oregon
     plan: free
     rootDir: backend
@@ -29,7 +29,7 @@ services:
   # Frontend SPA service (React + Vite)
   - type: web
     name: attendx-web
-    env: static
+    runtime: static
     region: oregon
     plan: free
     rootDir: frontend
