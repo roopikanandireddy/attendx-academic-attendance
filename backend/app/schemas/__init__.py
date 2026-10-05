@@ -1,5 +1,17 @@
 # Schemas package
-from app.schemas.user import UserRegister, UserLogin, UserUpdate, UserResponse, TokenResponse
+from app.schemas.user import (
+    UserRegister,
+    UserLogin,
+    UserUpdate,
+    UserResponse,
+    TokenResponse,
+    AdminCreateStudent,
+    AdminCreateLecturer,
+    AccountActivationRequest,
+    TokenVerificationResponse,
+    PasswordForgotRequest,
+    PasswordResetRequest,
+)
 from app.schemas.subject import SubjectCreate, SubjectUpdate, SubjectResponse, BatchEnrollmentRequest, BatchEnrollmentResponse
 from app.schemas.attendance import (
     AttendanceBulkCreate,

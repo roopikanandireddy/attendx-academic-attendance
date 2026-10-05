@@ -24,6 +24,7 @@ class User(Base):
     year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     section: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    account_status: Mapped[str] = mapped_column(String(20), default="ACTIVE", server_default="ACTIVE", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
@@ -41,4 +42,10 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
         order_by="desc(Notification.created_at)",
+    )
+    activation_tokens = relationship(
+        "AccountToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="desc(AccountToken.created_at)",
     )

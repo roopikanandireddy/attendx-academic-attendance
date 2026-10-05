@@ -61,10 +61,15 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
-    if not user.is_active:
+    if not user.is_active or (user.account_status and user.account_status.upper() in ("DISABLED", "SUSPENDED")):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is disabled. Please contact an administrator.",
+        )
+    if user.account_status and user.account_status.upper() == "INVITED":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is pending activation. Please check your email for the activation link.",
         )
     return user
 

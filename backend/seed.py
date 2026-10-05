@@ -17,6 +17,7 @@ from app.models.subject import Subject
 from app.models.student_subject import StudentSubject
 from app.models.attendance import Attendance
 from app.models.lecturer_subject import LecturerSubject
+from app.services.admin_provisioning import provision_admin_accounts
 
 
 def seed_database():
@@ -63,6 +64,7 @@ def seed_database():
 
             db.commit()
             print("Database already contains seed data. Teaching assignments synchronized.")
+            provision_admin_accounts(db)
             return
 
         print("Seeding database with initial data...")

@@ -4,5 +4,14 @@ from app.models.student_subject import StudentSubject
 from app.models.lecturer_subject import LecturerSubject
 from app.models.attendance import Attendance
 from app.models.notification import Notification
+from app.models.account_token import AccountToken
 
-__all__ = ["User", "Subject", "StudentSubject", "LecturerSubject", "Attendance", "Notification"]
+__all__ = [
+    "User",
+    "Subject",
+    "StudentSubject",
+    "LecturerSubject",
+    "Attendance",
+    "Notification",
+    "AccountToken",
+]

@@ -5,6 +5,9 @@ import DashboardLayout from './layouts/DashboardLayout';
 import AdminLayout from './layouts/AdminLayout';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import AccountActivationPage from './pages/AccountActivationPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import StudentDashboard from './pages/StudentDashboard';
 import ProfilePage from './pages/ProfilePage';
 import MySubjectsPage from './pages/MySubjectsPage';
@@ -13,6 +16,7 @@ import AttendanceRecordsPage from './pages/AttendanceRecordsPage';
 import LoadingSpinner from './components/LoadingSpinner';
 import UnauthorizedState from './components/UnauthorizedState';
 import NotificationsPage from './pages/NotificationsPage';
+import RoleSelectionPage from './pages/RoleSelectionPage';
 
 // Admin Foundation Pages
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
@@ -66,13 +70,15 @@ function StudentRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function RootRedirect() {
+function RootRoute() {
   const { user, loading } = useAuth();
   if (loading) return <LoadingSpinner size="lg" text="Loading AttendX..." />;
-  if (!user) return <Navigate to="/login" replace />;
-  if (user.role === 'admin') return <Navigate to="/admin/dashboard" replace />;
-  if (user.role === 'lecturer') return <Navigate to="/lecturer/dashboard" replace />;
-  return <Navigate to="/dashboard" replace />;
+  if (user) {
+    if (user.role === 'admin') return <Navigate to="/admin/dashboard" replace />;
+    if (user.role === 'lecturer') return <Navigate to="/lecturer/dashboard" replace />;
+    return <Navigate to="/dashboard" replace />;
+  }
+  return <RoleSelectionPage />;
 }
 
 function App() {
@@ -87,12 +93,28 @@ function App() {
           }}
         />
         <Routes>
-          {/* Public routes */}
+          {/* Root role-selection landing page for visitors / dashboard redirect for authenticated users */}
+          <Route path="/" element={<RootRoute />} />
+
+          {/* Public authentication routes */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/activate-account" element={<AccountActivationPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
 
-          {/* Root redirect */}
-          <Route path="/" element={<RootRedirect />} />
+          {/* Role-specific login route aliases */}
+          <Route path="/student/login" element={<Navigate to="/login?role=student" replace />} />
+          <Route path="/lecturer/login" element={<Navigate to="/login?role=lecturer" replace />} />
+          <Route path="/admin/login" element={<Navigate to="/login?role=admin" replace />} />
+
+          {/* Registration route aliases */}
+          <Route path="/student/register" element={<Navigate to="/register" replace />} />
+          <Route path="/lecturer/register" element={<Navigate to="/register" replace />} />
+          <Route path="/admin/register" element={<Navigate to="/register" replace />} />
+
+          {/* Dashboard route aliases */}
+          <Route path="/student/dashboard" element={<Navigate to="/dashboard" replace />} />
 
           {/* Student routes — 100% preserved */}
           <Route element={<DashboardLayout />}>

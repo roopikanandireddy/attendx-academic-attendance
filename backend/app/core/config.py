@@ -14,6 +14,26 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
     ALLOWED_ORIGINS: str = ""
 
+    # Account Activation & Security Tokens
+    ACCOUNT_ACTIVATION_TOKEN_EXPIRE_HOURS: int = 24
+    PASSWORD_RESET_TOKEN_EXPIRE_HOURS: int = 2
+
+    # Email Service Configuration
+    EMAIL_PROVIDER: str = "console"
+    EMAIL_HOST: str = ""
+    EMAIL_PORT: int = 587
+    EMAIL_USERNAME: str = ""
+    EMAIL_PASSWORD: str = ""
+    EMAIL_FROM: str = "noreply@attendx.edu"
+    EMAIL_FROM_NAME: str = "AttendX Administration"
+    EMAIL_USE_TLS: bool = True
+
+    # Production Administrator Provisioning (Backend-only, never committed to git)
+    ADMIN_ROOPIKA_PASSWORD: str = ""
+    ADMIN_SRIKANTH_PASSWORD: str = ""
+    ADMIN_1_PASSWORD: str = ""
+    ADMIN_2_PASSWORD: str = ""
+
     @model_validator(mode="after")
     def validate_production_secrets(self):
         is_production = os.getenv("RENDER") == "true" or os.getenv("ENVIRONMENT") == "production"

@@ -36,6 +36,9 @@ from app.services.notification_service import (
 )
 from app.services.lecturer_report_service import LecturerReportService
 from app.api.dashboard import get_lecturer_dashboard_data
+import uuid
+from app.services.token_service import create_activation_token
+from app.services.email_service import email_service
 
 router = APIRouter(prefix="/api/lecturers", tags=["Lecturers"])
 admin_router = APIRouter(prefix="/api/admin/lecturers", tags=["Admin Lecturers"])
@@ -84,12 +87,15 @@ def list_lecturers_data(
             | (User.employee_id.ilike(term))
         )
 
-    # Status filter: active / inactive
-    if status_filter and status_filter.lower() != "all":
-        if status_filter.lower() == "active":
-            query = query.filter(User.is_active == True)
-        elif status_filter.lower() == "inactive":
-            query = query.filter(User.is_active == False)
+    # Status filter: active / inactive / invited / disabled
+    if status_filter and status_filter.strip().lower() != "all":
+        sf = status_filter.strip().lower()
+        if sf == "active":
+            query = query.filter((User.account_status == "ACTIVE") & (User.is_active == True))
+        elif sf == "invited":
+            query = query.filter(User.account_status == "INVITED")
+        elif sf in ("inactive", "disabled"):
+            query = query.filter((User.account_status == "DISABLED") | (User.is_active == False))
 
     # Department filter
     if department and department.strip() and department.lower() != "all":
@@ -125,7 +131,8 @@ def list_lecturers_data(
             "department": l.department or "",
             "role": l.role,
             "is_active": l.is_active,
-            "status": "Active" if l.is_active else "Inactive",
+            "account_status": l.account_status or ("ACTIVE" if l.is_active else "DISABLED"),
+            "status": l.account_status.capitalize() if l.account_status else ("Active" if l.is_active else "Inactive"),
             "assigned_subjects_count": sub_count,
             "created_at": l.created_at.isoformat() if l.created_at else None,
             "updated_at": l.updated_at.isoformat() if l.updated_at else None,
@@ -170,7 +177,8 @@ def get_single_lecturer_data(db: Session, lecturer_id: str) -> dict:
         "department": lecturer.department or "",
         "role": lecturer.role,
         "is_active": lecturer.is_active,
-        "status": "Active" if lecturer.is_active else "Inactive",
+        "account_status": lecturer.account_status or ("ACTIVE" if lecturer.is_active else "DISABLED"),
+        "status": lecturer.account_status.capitalize() if lecturer.account_status else ("Active" if lecturer.is_active else "Inactive"),
         "assigned_subjects_count": len(assigned_subjects),
         "assigned_subjects": assigned_subjects,
         "created_at": lecturer.created_at.isoformat() if lecturer.created_at else None,
@@ -190,24 +198,39 @@ def create_lecturer_record(db: Session, data: AdminCreateLecturer) -> dict:
     if db.query(User).filter(User.employee_id == clean_emp_id).first():
         raise HTTPException(status_code=409, detail="A lecturer with this Employee ID already exists")
 
+    is_invited = not bool(data.password)
+    account_status = "INVITED" if is_invited else "ACTIVE"
+    is_active = False if is_invited else True
+    pw_hash = hash_password(data.password) if data.password else f"!INVITED!{uuid.uuid4().hex}"
+
     lecturer = User(
         full_name=data.full_name.strip(),
         email=normalized_email,
-        password_hash=hash_password(data.password),
+        password_hash=pw_hash,
         role="lecturer",
         employee_id=clean_emp_id,
         department=data.department.strip(),
-        is_active=True,
+        is_active=is_active,
+        account_status=account_status,
     )
     db.add(lecturer)
     db.commit()
     db.refresh(lecturer)
 
-    create_faculty_welcome_notification(
-        db=db,
-        user_id=lecturer.id,
-        full_name=lecturer.full_name,
-    )
+    if is_invited:
+        raw_token, _ = create_activation_token(db, lecturer)
+        email_service.send_account_activation_email(
+            to_email=lecturer.email,
+            full_name=lecturer.full_name,
+            activation_token=raw_token,
+            role="Lecturer",
+        )
+    else:
+        create_faculty_welcome_notification(
+            db=db,
+            user_id=lecturer.id,
+            full_name=lecturer.full_name,
+        )
 
     return {
         "id": lecturer.id,
@@ -217,7 +240,8 @@ def create_lecturer_record(db: Session, data: AdminCreateLecturer) -> dict:
         "department": lecturer.department,
         "role": lecturer.role,
         "is_active": lecturer.is_active,
-        "status": "Active",
+        "account_status": lecturer.account_status,
+        "status": lecturer.account_status.capitalize(),
         "assigned_subjects_count": 0,
         "created_at": lecturer.created_at.isoformat() if lecturer.created_at else None,
         "updated_at": lecturer.updated_at.isoformat() if lecturer.updated_at else None,
@@ -252,6 +276,10 @@ def update_lecturer_record(db: Session, lecturer_id: str, data: AdminUpdateLectu
 
     if data.is_active is not None:
         lecturer.is_active = data.is_active
+        if not data.is_active and lecturer.account_status != "INVITED":
+            lecturer.account_status = "DISABLED"
+        elif data.is_active and lecturer.account_status == "DISABLED":
+            lecturer.account_status = "ACTIVE"
 
     db.commit()
     db.refresh(lecturer)
@@ -264,7 +292,8 @@ def update_lecturer_record(db: Session, lecturer_id: str, data: AdminUpdateLectu
         "department": lecturer.department,
         "role": lecturer.role,
         "is_active": lecturer.is_active,
-        "status": "Active" if lecturer.is_active else "Inactive",
+        "account_status": lecturer.account_status or ("ACTIVE" if lecturer.is_active else "DISABLED"),
+        "status": lecturer.account_status.capitalize() if lecturer.account_status else ("Active" if lecturer.is_active else "Inactive"),
         "assigned_subjects_count": 0,
         "created_at": lecturer.created_at.isoformat() if lecturer.created_at else None,
         "updated_at": lecturer.updated_at.isoformat() if lecturer.updated_at else None,
@@ -278,6 +307,10 @@ def set_lecturer_active_status(db: Session, lecturer_id: str, is_active: bool) -
         raise HTTPException(status_code=404, detail="Lecturer not found")
 
     lecturer.is_active = is_active
+    if not is_active and lecturer.account_status != "INVITED":
+        lecturer.account_status = "DISABLED"
+    elif is_active and lecturer.account_status == "DISABLED":
+        lecturer.account_status = "ACTIVE"
     db.commit()
     db.refresh(lecturer)
 
@@ -287,8 +320,34 @@ def set_lecturer_active_status(db: Session, lecturer_id: str, is_active: bool) -
         "employee_id": lecturer.employee_id,
         "full_name": lecturer.full_name,
         "is_active": lecturer.is_active,
-        "status": "Active" if lecturer.is_active else "Inactive",
+        "account_status": lecturer.account_status or ("ACTIVE" if lecturer.is_active else "DISABLED"),
+        "status": lecturer.account_status.capitalize() if lecturer.account_status else ("Active" if lecturer.is_active else "Inactive"),
         "message": f"Lecturer account {action_label} successfully",
+    }
+
+
+def resend_lecturer_activation(db: Session, lecturer_id: str) -> dict:
+    """Resend activation email to an invited lecturer."""
+    lecturer = db.query(User).filter(User.id == lecturer_id, User.role == "lecturer").first()
+    if not lecturer:
+        raise HTTPException(status_code=404, detail="Lecturer not found")
+
+    if lecturer.account_status != "INVITED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account is already active or not in invited state",
+        )
+
+    raw_token, _ = create_activation_token(db, lecturer)
+    email_service.send_account_activation_email(
+        to_email=lecturer.email,
+        full_name=lecturer.full_name,
+        activation_token=raw_token,
+        role="Lecturer",
+    )
+    return {
+        "message": f"Activation email resent successfully to {lecturer.email}",
+        "email": lecturer.email,
     }
 
 
@@ -392,6 +451,15 @@ def admin_enable_lecturer(
     return set_lecturer_active_status(db, lecturer_id, True)
 
 
+@admin_router.post("/{lecturer_id}/resend-activation", summary="Resend activation email to lecturer")
+def admin_resend_lecturer_activation(
+    lecturer_id: str,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    return resend_lecturer_activation(db, lecturer_id)
+
+
 @admin_router.delete("/{lecturer_id}", summary="Delete lecturer (for testing cleanup)")
 def admin_delete_lecturer(
     lecturer_id: str,
@@ -409,6 +477,14 @@ def admin_delete_lecturer(
 # ==========================================
 # /api/lecturers ALIAS ROUTES
 # ==========================================
+
+@router.post("/{lecturer_id}/resend-activation", summary="Resend activation email to lecturer (alias)")
+def router_resend_lecturer_activation(
+    lecturer_id: str,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    return resend_lecturer_activation(db, lecturer_id)
 
 @router.get("/summary", summary="Get lecturer summary metrics")
 def get_lecturers_summary(

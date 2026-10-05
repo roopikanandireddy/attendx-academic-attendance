@@ -10,6 +10,8 @@ export interface User {
   department?: string;
   year?: number;
   section?: string;
+  is_active?: boolean;
+  account_status?: string;
   created_at: string;
   updated_at: string;
 }
@@ -59,6 +61,7 @@ export interface StudentListItem {
   section: string;
   role: string;
   is_active?: boolean;
+  account_status?: string;
   status?: string;
   attendance_percentage: number;
   total_classes: number;
@@ -93,6 +96,7 @@ export interface StudentDetailResponse {
   year: number;
   section: string;
   is_active: boolean;
+  account_status?: string;
   status: string;
   created_at?: string;
   updated_at?: string;
@@ -129,6 +133,7 @@ export interface LecturerListItem {
   department: string;
   role: string;
   is_active: boolean;
+  account_status?: string;
   status: string;
   assigned_subjects_count: number;
   created_at: string;

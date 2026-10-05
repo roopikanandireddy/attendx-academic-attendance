@@ -27,6 +27,8 @@ import {
   ChevronRight,
   CalendarCheck,
   BookOpen,
+  Mail,
+  Send,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -46,7 +48,7 @@ export default function AdminStudentsPage() {
 
   // Filters
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'invited' | 'inactive' | 'disabled'>('all');
   const [deptFilter, setDeptFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
   const [sectionFilter, setSectionFilter] = useState('');
@@ -226,11 +228,6 @@ export default function AdminStudentsPage() {
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
       errors.email = 'Valid email is required';
     }
-    if (!formData.password) {
-      errors.password = 'Password is required';
-    } else if (formData.password.length < 6) {
-      errors.password = 'Password must be at least 6 characters';
-    }
     if (!formData.department.trim()) errors.department = 'Department is required';
     if (!formData.year) errors.year = 'Year is required';
     if (!formData.section.trim()) errors.section = 'Section is required';
@@ -256,24 +253,24 @@ export default function AdminStudentsPage() {
     return Object.keys(errors).length === 0;
   };
 
-  // Handle Add Student Submit
+  // Handle Add Student Submit (Provisioning with activation email)
   const handleAddStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateAddForm()) return;
 
     setFormLoading(true);
+    const targetEmail = formData.email.trim().toLowerCase();
     try {
       await api.post('/api/admin/students', {
         student_id: formData.student_id.trim(),
         full_name: formData.full_name.trim(),
-        email: formData.email.trim().toLowerCase(),
-        password: formData.password,
+        email: targetEmail,
         department: formData.department.trim(),
         year: parseInt(formData.year, 10),
         section: formData.section.trim().toUpperCase(),
       });
 
-      toast.success('Student created successfully.');
+      toast.success(`Account created successfully. Activation email sent to: ${targetEmail}`);
       setShowAddModal(false);
       fetchStudents();
       fetchSummary();
@@ -282,6 +279,16 @@ export default function AdminStudentsPage() {
       toast.error(msg);
     } finally {
       setFormLoading(false);
+    }
+  };
+
+  // Handle Resend Activation Email
+  const handleResendActivation = async (student: StudentListItem) => {
+    try {
+      await api.post(`/api/admin/students/${student.id}/resend-activation`);
+      toast.success(`Activation email resent successfully to: ${student.email}`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to resend activation email.');
     }
   };
 
@@ -472,8 +479,9 @@ export default function AdminStudentsPage() {
               aria-label="Filter by account status"
             >
               <option value="all">All Statuses</option>
-              <option value="active">Active Only</option>
-              <option value="inactive">Inactive Only</option>
+              <option value="active">Active Accounts</option>
+              <option value="invited">Invited (Pending Activation)</option>
+              <option value="inactive">Disabled / Inactive</option>
             </select>
           </div>
 
@@ -614,6 +622,7 @@ export default function AdminStudentsPage() {
                 <tbody className="divide-y divide-surface-100">
                   {students.map((student) => {
                     const isLow = student.attendance_percentage < 75.0 && student.total_classes > 0;
+                    const rawStatus = (student.account_status || (student.is_active !== false ? 'ACTIVE' : 'DISABLED')).toUpperCase();
                     return (
                       <tr key={student.id} className="hover:bg-surface-50/80 transition-colors">
                         <td className="py-3 px-4 font-semibold text-surface-900 font-mono">
@@ -635,15 +644,19 @@ export default function AdminStudentsPage() {
                           {student.section ? `Sec ${student.section}` : '—'}
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.68rem] font-bold ${
-                              student.status === 'Active' || student.is_active !== false
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-surface-200 text-surface-700'
-                            }`}
-                          >
-                            {student.status || (student.is_active !== false ? 'Active' : 'Inactive')}
-                          </span>
+                          {rawStatus === 'INVITED' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.68rem] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                              Invited
+                            </span>
+                          ) : rawStatus === 'ACTIVE' && student.is_active !== false ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.68rem] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              Active
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.68rem] font-bold bg-surface-200 text-surface-700 border border-surface-300">
+                              Disabled
+                            </span>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <span
@@ -660,6 +673,18 @@ export default function AdminStudentsPage() {
                         </td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            {/* Resend Activation for Invited Accounts */}
+                            {rawStatus === 'INVITED' && (
+                              <button
+                                onClick={() => handleResendActivation(student)}
+                                className="p-1.5 rounded-lg text-amber-600 hover:text-amber-800 hover:bg-amber-50 transition-colors"
+                                title="Resend account activation email"
+                                aria-label={`Resend activation email for ${student.full_name}`}
+                              >
+                                <Send className="w-4 h-4" />
+                              </button>
+                            )}
+
                             {/* View Action */}
                             <button
                               onClick={() => openViewStudentModal(student.id)}
@@ -681,7 +706,7 @@ export default function AdminStudentsPage() {
                             </button>
 
                             {/* Disable / Enable Action */}
-                            {student.status === 'Active' || student.is_active !== false ? (
+                            {(student.status === 'Active' || student.is_active !== false) && rawStatus !== 'DISABLED' ? (
                               <button
                                 onClick={() => {
                                   setConfirmStudent(student);
@@ -811,22 +836,13 @@ export default function AdminStudentsPage() {
             )}
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-surface-700 mb-1">
-              Account Password *
-            </label>
-            <input
-              type="password"
-              placeholder="Minimum 6 characters"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              className={`input text-xs w-full ${formErrors.password ? 'border-red-500' : ''}`}
-            />
-            {formErrors.password && (
-              <p className="text-[0.7rem] text-red-500 mt-0.5">{formErrors.password}</p>
-            )}
-            <p className="text-[0.65rem] text-surface-400 mt-1">
-              Password will be encrypted using bcrypt. The student will log in using this password.
+          <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-xl text-xs text-blue-800 space-y-1">
+            <div className="flex items-center gap-1.5 font-semibold text-blue-900">
+              <Mail className="w-3.5 h-3.5 text-blue-600" />
+              <span>Institutional Account Provisioning</span>
+            </div>
+            <p className="text-[11px] leading-relaxed text-blue-700">
+              This account will be created in <strong className="font-semibold text-blue-900">INVITED</strong> status. AttendX will generate a cryptographically secure, single-use activation token and send an activation email to this address. The student will set their own password upon activation.
             </p>
           </div>
 

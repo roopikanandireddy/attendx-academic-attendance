@@ -26,6 +26,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Mail,
+  Send,
   Building,
   Calendar,
   Layers,
@@ -59,7 +60,7 @@ export default function AdminLecturersPage() {
 
   // Filters
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'invited' | 'inactive' | 'disabled'>('all');
   const [deptFilter, setDeptFilter] = useState('');
   const [assignmentFilter, setAssignmentFilter] = useState<'all' | 'assigned' | 'unassigned'>('all');
 
@@ -218,7 +219,7 @@ export default function AdminLecturersPage() {
   };
 
   // Form field validation
-  const validateForm = (isEdit = false) => {
+  const validateForm = (_isEdit = false) => {
     const errors: Record<string, string> = {};
     if (!formData.employee_id.trim()) {
       errors.employee_id = 'Employee ID is required';
@@ -236,33 +237,26 @@ export default function AdminLecturersPage() {
     if (!formData.department.trim()) {
       errors.department = 'Department is required';
     }
-    if (!isEdit) {
-      if (!formData.password) {
-        errors.password = 'Password is required';
-      } else if (formData.password.length < 6) {
-        errors.password = 'Password must be at least 6 characters';
-      }
-    }
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
-  // Submit Add Lecturer
+  // Submit Add Lecturer (Provisioning with activation email)
   const handleCreateLecturer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateForm(false)) return;
+    if (!validateForm()) return;
 
     setFormLoading(true);
+    const targetEmail = formData.email.trim().toLowerCase();
     try {
       await api.post('/api/admin/lecturers', {
         employee_id: formData.employee_id.trim(),
         full_name: formData.full_name.trim(),
-        email: formData.email.trim().toLowerCase(),
+        email: targetEmail,
         department: formData.department.trim(),
-        password: formData.password,
       });
 
-      toast.success('Lecturer created successfully.');
+      toast.success(`Account created successfully. Activation email sent to: ${targetEmail}`);
       setShowAddModal(false);
       fetchLecturers(true);
       fetchSummary();
@@ -281,6 +275,16 @@ export default function AdminLecturersPage() {
       }
     } finally {
       setFormLoading(false);
+    }
+  };
+
+  // Handle Resend Activation Email
+  const handleResendActivation = async (lecturer: LecturerListItem) => {
+    try {
+      await api.post(`/api/admin/lecturers/${lecturer.id}/resend-activation`);
+      toast.success(`Activation email resent successfully to: ${lecturer.email}`);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to resend activation email.');
     }
   };
 
@@ -482,8 +486,9 @@ export default function AdminLecturersPage() {
               aria-label="Filter by Status"
             >
               <option value="all">All Status</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
+              <option value="active">Active Accounts</option>
+              <option value="invited">Invited (Pending)</option>
+              <option value="inactive">Disabled / Inactive</option>
             </select>
 
             {/* Department Filter */}
@@ -583,7 +588,8 @@ export default function AdminLecturersPage() {
                 </thead>
                 <tbody className="divide-y divide-surface-100">
                   {lecturers.map((lecturer) => {
-                    const isActive = lecturer.is_active;
+                    const rawStatus = (lecturer.account_status || (lecturer.is_active !== false ? 'ACTIVE' : 'DISABLED')).toUpperCase();
+                    const isActive = lecturer.is_active !== false && rawStatus === 'ACTIVE';
                     return (
                       <tr key={lecturer.id} className="hover:bg-surface-50/70 transition-colors">
                         <td className="px-5 py-4 font-mono font-medium text-surface-800">
@@ -611,7 +617,12 @@ export default function AdminLecturersPage() {
                           </span>
                         </td>
                         <td className="px-5 py-4">
-                          {isActive ? (
+                          {rawStatus === 'INVITED' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                              Invited
+                            </span>
+                          ) : isActive ? (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                               Active
@@ -619,7 +630,7 @@ export default function AdminLecturersPage() {
                           ) : (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
                               <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                              Inactive
+                              Disabled
                             </span>
                           )}
                         </td>
@@ -637,6 +648,18 @@ export default function AdminLecturersPage() {
                         </td>
                         <td className="px-5 py-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            {/* Resend Activation for Invited Accounts */}
+                            {rawStatus === 'INVITED' && (
+                              <button
+                                onClick={() => handleResendActivation(lecturer)}
+                                className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg transition-colors"
+                                title="Resend account activation email"
+                                aria-label={`Resend activation email for ${lecturer.full_name}`}
+                              >
+                                <Send className="w-4 h-4" />
+                              </button>
+                            )}
+
                             <button
                               onClick={() => handleViewLecturer(lecturer.id)}
                               className="p-1.5 text-surface-500 hover:text-primary-600 hover:bg-surface-100 rounded-lg transition-colors"
@@ -805,24 +828,13 @@ export default function AdminLecturersPage() {
             )}
           </div>
 
-          <div>
-            <label className="label" htmlFor="add-password">
-              Account Password <span className="text-danger">*</span>
-            </label>
-            <input
-              id="add-password"
-              type="password"
-              placeholder="Minimum 6 characters"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              className={`input w-full ${formErrors.password ? 'border-danger' : ''}`}
-              disabled={formLoading}
-            />
-            {formErrors.password && (
-              <p className="text-danger text-xs mt-1">{formErrors.password}</p>
-            )}
-            <p className="text-surface-400 text-xs mt-1">
-              Passwords are automatically hashed using bcrypt. The lecturer will use this to sign in.
+          <div className="p-3.5 bg-indigo-50/70 border border-indigo-100 rounded-xl text-xs text-indigo-800 space-y-1">
+            <div className="flex items-center gap-1.5 font-semibold text-indigo-900">
+              <Mail className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Institutional Account Provisioning</span>
+            </div>
+            <p className="text-[11px] leading-relaxed text-indigo-700">
+              This account will be created in <strong className="font-semibold text-indigo-900">INVITED</strong> status. AttendX will generate a cryptographically secure, single-use activation token and send an activation email to this address. The faculty member will set their own password upon activation.
             </p>
           </div>
 

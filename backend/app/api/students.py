@@ -15,6 +15,9 @@ from app.schemas.user import (
     StudentStatusUpdate,
     UserResponse,
 )
+import uuid
+from app.services.token_service import create_activation_token
+from app.services.email_service import email_service
 
 router = APIRouter(prefix="/api/students", tags=["Students"])
 admin_router = APIRouter(prefix="/api/admin/students", tags=["Admin Students"])
@@ -80,9 +83,14 @@ def list_students_data(
         )
 
     # Status filter
-    if status_filter and status_filter.strip().lower() in ("active", "inactive"):
-        is_active_val = status_filter.strip().lower() == "active"
-        query = query.filter(User.is_active == is_active_val)
+    if status_filter and status_filter.strip().lower() in ("active", "inactive", "invited", "disabled"):
+        sf = status_filter.strip().lower()
+        if sf == "active":
+            query = query.filter((User.account_status == "ACTIVE") & (User.is_active == True))
+        elif sf == "invited":
+            query = query.filter(User.account_status == "INVITED")
+        elif sf in ("inactive", "disabled"):
+            query = query.filter((User.account_status == "DISABLED") | (User.is_active == False))
 
     # Department filter
     if department and department.strip():
@@ -122,7 +130,8 @@ def list_students_data(
             "year": student.year or 0,
             "section": student.section or "",
             "is_active": student.is_active,
-            "status": "Active" if student.is_active else "Inactive",
+            "account_status": student.account_status or ("ACTIVE" if student.is_active else "DISABLED"),
+            "status": student.account_status.capitalize() if student.account_status else ("Active" if student.is_active else "Inactive"),
             "role": student.role,
             "attendance_percentage": percentage,
             "total_classes": total_classes,
@@ -195,7 +204,8 @@ def get_single_student_data(db: Session, student_id: str) -> dict:
         "year": student.year or 0,
         "section": student.section or "",
         "is_active": student.is_active,
-        "status": "Active" if student.is_active else "Inactive",
+        "account_status": student.account_status or ("ACTIVE" if student.is_active else "DISABLED"),
+        "status": student.account_status.capitalize() if student.account_status else ("Active" if student.is_active else "Inactive"),
         "attendance_summary": {
             "total_classes": total_classes,
             "present": present_classes,
@@ -213,32 +223,49 @@ def get_single_student_data(db: Session, student_id: str) -> dict:
 
 
 def create_student_record(db: Session, data: AdminCreateStudent) -> dict:
-    """Validate and create a new student account."""
+    """Validate and create a new student account in INVITED state (or ACTIVE if password supplied)."""
     # Check email uniqueness
-    if db.query(User).filter(User.email == data.email.lower().strip()).first():
+    normalized_email = data.email.lower().strip()
+    if db.query(User).filter(User.email == normalized_email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists")
 
     # Check student_id uniqueness
-    if db.query(User).filter(User.student_id == data.student_id.strip()).first():
+    clean_sid = data.student_id.strip()
+    if db.query(User).filter(User.student_id == clean_sid).first():
         raise HTTPException(status_code=409, detail="A student with this ID already exists")
+
+    is_invited = not bool(data.password)
+    account_status = "ACTIVE" if not is_invited else "INVITED"
+    is_active = not is_invited
+    pw_hash = hash_password(data.password) if data.password else f"!INVITED!{uuid.uuid4().hex}"
 
     student = User(
         full_name=data.full_name.strip(),
-        email=data.email.lower().strip(),
-        password_hash=hash_password(data.password),
+        email=normalized_email,
+        password_hash=pw_hash,
         role="student",
-        student_id=data.student_id.strip(),
+        student_id=clean_sid,
         department=data.department.strip(),
         year=data.year,
         section=data.section.strip(),
-        is_active=True,
+        is_active=is_active,
+        account_status=account_status,
     )
     db.add(student)
     db.commit()
     db.refresh(student)
 
-    from app.services.notification_service import create_welcome_notification
-    create_welcome_notification(db=db, user_id=student.id)
+    if is_invited:
+        raw_token, _ = create_activation_token(db, student)
+        email_service.send_account_activation_email(
+            to_email=student.email,
+            full_name=student.full_name,
+            activation_token=raw_token,
+            role="Student",
+        )
+    else:
+        from app.services.notification_service import create_welcome_notification
+        create_welcome_notification(db=db, user_id=student.id)
 
     return {
         "id": student.id,
@@ -250,7 +277,8 @@ def create_student_record(db: Session, data: AdminCreateStudent) -> dict:
         "section": student.section,
         "role": student.role,
         "is_active": student.is_active,
-        "status": "Active",
+        "account_status": student.account_status,
+        "status": student.account_status.capitalize(),
         "created_at": student.created_at.isoformat() if student.created_at else None,
         "updated_at": student.updated_at.isoformat() if student.updated_at else None,
     }
@@ -284,6 +312,17 @@ def update_student_record(db: Session, student_id: str, data: AdminUpdateStudent
         student.section = data.section.strip()
     if data.is_active is not None:
         student.is_active = data.is_active
+        if not data.is_active and student.account_status != "INVITED":
+            student.account_status = "DISABLED"
+        elif data.is_active and student.account_status == "DISABLED":
+            student.account_status = "ACTIVE"
+    if data.account_status is not None:
+        new_status = data.account_status.strip().upper()
+        student.account_status = new_status
+        if new_status == "DISABLED":
+            student.is_active = False
+        elif new_status == "ACTIVE":
+            student.is_active = True
 
     db.commit()
     db.refresh(student)
@@ -298,7 +337,8 @@ def update_student_record(db: Session, student_id: str, data: AdminUpdateStudent
         "section": student.section,
         "role": student.role,
         "is_active": student.is_active,
-        "status": "Active" if student.is_active else "Inactive",
+        "account_status": student.account_status,
+        "status": student.account_status.capitalize() if student.account_status else ("Active" if student.is_active else "Inactive"),
         "created_at": student.created_at.isoformat() if student.created_at else None,
         "updated_at": student.updated_at.isoformat() if student.updated_at else None,
     }
@@ -311,6 +351,7 @@ def set_student_active_status(db: Session, student_id: str, is_active: bool) -> 
         raise HTTPException(status_code=404, detail="Student not found")
 
     student.is_active = is_active
+    student.account_status = "ACTIVE" if is_active else "DISABLED"
     db.commit()
     db.refresh(student)
 
@@ -320,9 +361,37 @@ def set_student_active_status(db: Session, student_id: str, is_active: bool) -> 
         "student_id": student.student_id,
         "full_name": student.full_name,
         "is_active": student.is_active,
-        "status": "Active" if student.is_active else "Inactive",
+        "account_status": student.account_status,
+        "status": student.account_status.capitalize(),
         "message": f"Student account {action_label} successfully",
     }
+
+
+def resend_student_activation_email(db: Session, student_id: str) -> dict:
+    """Resend account activation email to a student in INVITED status."""
+    student = db.query(User).filter(User.id == student_id, User.role == "student").first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    if student.account_status != "INVITED":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot resend activation for account with status '{student.account_status}'. Only INVITED accounts can be activated.",
+        )
+
+    raw_token, _ = create_activation_token(db, student)
+    email_service.send_account_activation_email(
+        to_email=student.email,
+        full_name=student.full_name,
+        activation_token=raw_token,
+        role="Student",
+    )
+    return {
+        "message": f"Activation email resent successfully to {student.email}",
+        "email": student.email,
+    }
+
+
+resend_student_activation = resend_student_activation_email
 
 
 # ==========================================
@@ -436,6 +505,16 @@ def enable_student_account(
 ):
     """Enable student account. Admin only."""
     return set_student_active_status(db, student_id, True)
+
+
+@router.post("/{student_id}/resend-activation", summary="Resend activation email to student")
+def resend_activation_email(
+    student_id: str,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Resend activation email to a student in INVITED status. Admin only."""
+    return resend_student_activation_email(db, student_id)
 
 
 @router.delete("/{student_id}", status_code=status.HTTP_204_NO_CONTENT,
@@ -602,6 +681,16 @@ def admin_enable_student(
     db: Session = Depends(get_db),
 ):
     return set_student_active_status(db, student_id, True)
+
+
+@admin_router.post("/{student_id}/resend-activation", summary="Resend activation email to student")
+def admin_resend_student_activation(
+    student_id: str,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Resend activation email to a student in INVITED status. Admin only."""
+    return resend_student_activation_email(db, student_id)
 
 
 @admin_router.delete("/{student_id}", status_code=status.HTTP_204_NO_CONTENT,

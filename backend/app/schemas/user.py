@@ -56,14 +56,36 @@ class UserUpdate(BaseModel):
         return v
 
 
+def validate_email_format(v: str) -> str:
+    v = v.strip().lower()
+    if "@" not in v:
+        raise ValueError("Invalid email format")
+    parts = v.split("@")
+    if len(parts) != 2:
+        raise ValueError("Invalid email format")
+    local_part, domain = parts
+    if not local_part or not domain:
+        raise ValueError("Invalid email format")
+    if "." not in domain or domain.startswith(".") or domain.endswith("."):
+        raise ValueError("Email must contain a valid domain (e.g. university.edu)")
+    if domain in ("test", "demo", "abc", "example", "invalid"):
+        raise ValueError("Please provide a legitimate institutional or personal email address")
+    return v
+
+
 class AdminCreateStudent(BaseModel):
     full_name: str
     email: EmailStr
-    password: str
     student_id: str
     department: str
     year: int
     section: str
+    password: Optional[str] = None
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        return validate_email_format(v)
 
     @field_validator("full_name")
     @classmethod
@@ -75,8 +97,8 @@ class AdminCreateStudent(BaseModel):
 
     @field_validator("password")
     @classmethod
-    def validate_password(cls, v: str) -> str:
-        if len(v) < 6:
+    def validate_password(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) < 6:
             raise ValueError("Password must be at least 6 characters")
         return v
 
@@ -104,6 +126,7 @@ class AdminUpdateStudent(BaseModel):
     year: Optional[int] = None
     section: Optional[str] = None
     is_active: Optional[bool] = None
+    account_status: Optional[str] = None
 
 
 class StudentStatusUpdate(BaseModel):
@@ -115,7 +138,12 @@ class AdminCreateLecturer(BaseModel):
     full_name: str
     email: EmailStr
     department: str
-    password: str
+    password: Optional[str] = None
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        return validate_email_format(v)
 
     @field_validator("employee_id")
     @classmethod
@@ -144,6 +172,42 @@ class AdminCreateLecturer(BaseModel):
         if len(v) < 1:
             raise ValueError("Department is required")
         return v
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        return v
+
+
+class AccountActivationRequest(BaseModel):
+    token: str
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        return v
+
+
+class TokenVerificationResponse(BaseModel):
+    valid: bool
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    message: str = ""
+
+
+class PasswordForgotRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetRequest(BaseModel):
+    token: str
+    password: str
 
     @field_validator("password")
     @classmethod
@@ -203,6 +267,7 @@ class UserResponse(BaseModel):
     year: Optional[int] = None
     section: Optional[str] = None
     is_active: bool = True
+    account_status: str = "ACTIVE"
     created_at: datetime
     updated_at: datetime
 
