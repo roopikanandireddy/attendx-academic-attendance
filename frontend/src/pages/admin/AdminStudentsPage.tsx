@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import api from '../../services/api';
+import api, { isRequestCancelled } from '../../services/api';
 import type {
   StudentListItem,
   StudentSummaryMetrics,
@@ -81,12 +81,13 @@ export default function AdminStudentsPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   // Fetch summary statistics
-  const fetchSummary = useCallback(async () => {
+  const fetchSummary = useCallback(async (signal?: AbortSignal) => {
     setSummaryLoading(true);
     try {
-      const res = await api.get<StudentSummaryMetrics>('/api/admin/students/summary');
+      const res = await api.get<StudentSummaryMetrics>('/api/admin/students/summary', { signal });
       setSummary(res.data);
-    } catch {
+    } catch (err) {
+      if (isRequestCancelled(err)) return;
       // Fallback: don't break main page if summary fails temporarily
     } finally {
       setSummaryLoading(false);
@@ -94,7 +95,7 @@ export default function AdminStudentsPage() {
   }, []);
 
   // Fetch students table data
-  const fetchStudents = useCallback(async (isManualRefresh = false) => {
+  const fetchStudents = useCallback(async (isManualRefresh = false, signal?: AbortSignal) => {
     if (isManualRefresh) {
       setRefreshing(true);
     } else {
@@ -115,7 +116,7 @@ export default function AdminStudentsPage() {
       if (sectionFilter.trim()) params.section = sectionFilter.trim();
       if (attendanceFilter !== 'all') params.attendance = attendanceFilter;
 
-      const res = await api.get<StudentListResponse | StudentListItem[]>('/api/admin/students', { params });
+      const res = await api.get<StudentListResponse | StudentListItem[]>('/api/admin/students', { params, signal });
 
       if (Array.isArray(res.data)) {
         setStudents(res.data);
@@ -127,6 +128,7 @@ export default function AdminStudentsPage() {
         setTotalPages(res.data.pages || 1);
       }
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       const msg = err.response?.data?.detail || err.message || 'Unable to load students.';
       setError(msg);
     } finally {
@@ -136,11 +138,19 @@ export default function AdminStudentsPage() {
   }, [currentPage, search, statusFilter, deptFilter, yearFilter, sectionFilter, attendanceFilter]);
 
   useEffect(() => {
-    fetchSummary();
+    const controller = new AbortController();
+    fetchSummary(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchSummary]);
 
   useEffect(() => {
-    fetchStudents();
+    const controller = new AbortController();
+    fetchStudents(false, controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchStudents]);
 
   // Reset page when filters change

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import notificationService from '../services/notificationService';
+import { isRequestCancelled } from '../services/api';
 import type { NotificationItem, NotificationType } from '../types';
 import {
   Bell,
@@ -112,7 +113,7 @@ export default function NotificationsPage() {
   const [statusTab, setStatusTab] = useState<'all' | 'unread'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
-  const fetchNotifications = useCallback(async (isRefresh = false) => {
+  const fetchNotifications = useCallback(async (isRefresh = false, signal?: AbortSignal) => {
     if (isRefresh) {
       setRefreshing(true);
     } else {
@@ -120,9 +121,10 @@ export default function NotificationsPage() {
     }
     setError(null);
     try {
-      const data = await notificationService.getNotifications(100, 1);
+      const data = await notificationService.getNotifications(100, 1, undefined, undefined, { signal });
       setNotifications(data);
-    } catch {
+    } catch (err) {
+      if (isRequestCancelled(err)) return;
       setError('Unable to load notifications. Please check your connection and try again.');
     } finally {
       setLoading(false);
@@ -131,7 +133,11 @@ export default function NotificationsPage() {
   }, []);
 
   useEffect(() => {
-    fetchNotifications();
+    const controller = new AbortController();
+    fetchNotifications(false, controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchNotifications]);
 
   const unreadCount = useMemo(() => {

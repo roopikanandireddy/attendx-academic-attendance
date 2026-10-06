@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import api from '../services/api';
+import { useEffect, useState, useCallback } from 'react';
+import api, { isRequestCancelled } from '../services/api';
 import type { SubjectStats } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
@@ -13,19 +13,26 @@ export default function MySubjectsPage() {
   const [error, setError] = useState('');
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setError('');
     try {
-      const res = await api.get('/api/dashboard/student');
+      const res = await api.get('/api/dashboard/student', { signal });
       setSubjects(res.data.subjects);
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       setError(err.response?.data?.detail || 'Failed to load subjects');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchData(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [fetchData]);
 
   const getColor = (pct: number, total: number = 1) => {
     if (total === 0) return { bg: 'bg-surface-300', text: 'text-surface-500', badge: 'badge-secondary' };

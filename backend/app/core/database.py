@@ -26,8 +26,19 @@ if database_url.startswith("sqlite"):
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 else:
-    engine = create_engine(database_url, pool_pre_ping=True)
+    engine = create_engine(
+        database_url,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=5,
+        pool_timeout=15,
+        pool_recycle=300,
+        connect_args={"connect_timeout": 10},
+    )
 
+# Module 8 — Observability: Measure aggregate DB query execution duration
+from app.core.observability import setup_db_timing_hooks
+setup_db_timing_hooks(engine)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -40,5 +51,8 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

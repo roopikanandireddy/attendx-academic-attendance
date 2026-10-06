@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import api from '../services/api';
+import { useEffect, useState, useCallback } from 'react';
+import api, { isRequestCancelled } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import type { Subject, AttendanceRecord } from '../types';
 import { TableSkeleton } from '../components/Skeleton';
@@ -33,10 +33,18 @@ export default function AttendanceRecordsPage() {
   const [editLoading, setEditLoading] = useState(false);
 
   useEffect(() => {
-    api.get('/api/subjects').then(res => setSubjects(res.data)).catch(() => {});
+    const controller = new AbortController();
+    api.get('/api/subjects', { signal: controller.signal })
+      .then(res => setSubjects(res.data))
+      .catch(err => {
+        if (isRequestCancelled(err)) return;
+      });
+    return () => {
+      controller.abort();
+    };
   }, []);
 
-  const fetchRecords = async () => {
+  const fetchRecords = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setError('');
     try {
       const params: Record<string, string | number> = { page, limit: 30 };
@@ -44,17 +52,24 @@ export default function AttendanceRecordsPage() {
       if (filterStatus) params.status = filterStatus;
       if (filterDateFrom) params.date_from = filterDateFrom;
       if (filterDateTo) params.date_to = filterDateTo;
-      const res = await api.get('/api/attendance', { params });
+      const res = await api.get('/api/attendance', { params, signal });
       setRecords(res.data.records);
       setTotal(res.data.total);
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       setError(err.response?.data?.detail || 'Failed to load records');
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterSubject, filterStatus, filterDateFrom, filterDateTo, page]);
 
-  useEffect(() => { fetchRecords(); }, [filterSubject, filterStatus, filterDateFrom, filterDateTo, page]);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchRecords(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [fetchRecords]);
 
   const handleEdit = async () => {
     if (!editRecord) return;

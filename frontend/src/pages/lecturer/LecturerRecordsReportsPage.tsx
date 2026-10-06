@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import api from '../../services/api';
+import api, { isRequestCancelled } from '../../services/api';
 import type {
   LecturerAssignedSubjectItem,
   LecturerRecordsResponse,
@@ -72,12 +72,13 @@ export default function LecturerRecordsReportsPage() {
   const [isExporting, setIsExporting] = useState(false);
 
   // Fetch assigned subjects
-  const fetchAssignedSubjects = useCallback(async () => {
+  const fetchAssignedSubjects = useCallback(async (signal?: AbortSignal) => {
     setLoadingSubjects(true);
     try {
-      const res = await api.get<LecturerAssignedSubjectItem[]>('/api/lecturer/subjects');
+      const res = await api.get<LecturerAssignedSubjectItem[]>('/api/lecturer/subjects', { signal });
       setSubjects(res.data);
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       toast.error(err.response?.data?.detail || 'Failed to load assigned subjects');
     } finally {
       setLoadingSubjects(false);
@@ -85,11 +86,15 @@ export default function LecturerRecordsReportsPage() {
   }, []);
 
   useEffect(() => {
-    fetchAssignedSubjects();
+    const controller = new AbortController();
+    fetchAssignedSubjects(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchAssignedSubjects]);
 
   // Fetch records
-  const fetchRecords = useCallback(async () => {
+  const fetchRecords = useCallback(async (signal?: AbortSignal) => {
     setLoadingRecords(true);
     setRecordsError(null);
     try {
@@ -106,9 +111,10 @@ export default function LecturerRecordsReportsPage() {
       if (statusFilter !== 'all') params.status = statusFilter;
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
-      const res = await api.get<LecturerRecordsResponse>('/api/lecturer/records', { params });
+      const res = await api.get<LecturerRecordsResponse>('/api/lecturer/records', { params, signal });
       setRecordsData(res.data);
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       setRecordsError(err.response?.data?.detail || 'Failed to load attendance records');
     } finally {
       setLoadingRecords(false);
@@ -116,11 +122,15 @@ export default function LecturerRecordsReportsPage() {
   }, [selectedSubjectId, dateFrom, dateTo, statusFilter, searchQuery, page, limit, sortBy, sortOrder]);
 
   useEffect(() => {
-    fetchRecords();
+    const controller = new AbortController();
+    fetchRecords(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchRecords]);
 
   // Fetch subject-level report
-  const fetchSubjectReport = useCallback(async () => {
+  const fetchSubjectReport = useCallback(async (signal?: AbortSignal) => {
     if (!selectedSubjectId) {
       setSubjectReportData(null);
       return;
@@ -134,10 +144,11 @@ export default function LecturerRecordsReportsPage() {
 
       const res = await api.get<LecturerSubjectReportResponse>(
         `/api/lecturer/reports/subject/${selectedSubjectId}`,
-        { params }
+        { params, signal }
       );
       setSubjectReportData(res.data);
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       setSubjectReportError(err.response?.data?.detail || 'Failed to load subject report');
     } finally {
       setLoadingSubjectReport(false);
@@ -146,7 +157,11 @@ export default function LecturerRecordsReportsPage() {
 
   useEffect(() => {
     if (activeTab === 'subject_report' && selectedSubjectId) {
-      fetchSubjectReport();
+      const controller = new AbortController();
+      fetchSubjectReport(controller.signal);
+      return () => {
+        controller.abort();
+      };
     }
   }, [activeTab, selectedSubjectId, fetchSubjectReport]);
 
@@ -165,6 +180,7 @@ export default function LecturerRecordsReportsPage() {
       );
       setStudentReportData(res.data);
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       setStudentReportError(err.response?.data?.detail || 'Failed to load student attendance history');
     } finally {
       setLoadingStudentReport(false);

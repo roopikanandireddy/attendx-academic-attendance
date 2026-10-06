@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import api from '../../services/api';
+import api, { isRequestCancelled } from '../../services/api';
 import type {
   SubjectListItem,
   SubjectSummaryMetrics,
@@ -100,12 +100,13 @@ export default function AdminSubjectsPage() {
   const [viewTab, setViewTab] = useState<'info' | 'faculty' | 'students'>('info');
 
   // Fetch summary metrics
-  const fetchSummary = useCallback(async () => {
+  const fetchSummary = useCallback(async (signal?: AbortSignal) => {
     setSummaryLoading(true);
     try {
-      const res = await api.get<SubjectSummaryMetrics>('/api/admin/subjects/summary');
+      const res = await api.get<SubjectSummaryMetrics>('/api/admin/subjects/summary', { signal });
       setSummary(res.data);
-    } catch {
+    } catch (err: unknown) {
+      if (isRequestCancelled(err)) return;
       // Don't break page on summary failure
     } finally {
       setSummaryLoading(false);
@@ -114,7 +115,7 @@ export default function AdminSubjectsPage() {
 
   // Fetch subjects table data
   const fetchSubjects = useCallback(
-    async (isManualRefresh = false) => {
+    async (isManualRefresh = false, signal?: AbortSignal) => {
       if (isManualRefresh) setRefreshing(true);
       else setLoading(true);
       setError(null);
@@ -131,7 +132,7 @@ export default function AdminSubjectsPage() {
         if (semesterFilter.trim()) params.semester = semesterFilter.trim();
         if (assignmentFilter !== 'all') params.assignment_status = assignmentFilter;
 
-        const res = await api.get<SubjectListResponse>('/api/admin/subjects', { params });
+        const res = await api.get<SubjectListResponse>('/api/admin/subjects', { params, signal });
 
         if (res.data && Array.isArray(res.data.items)) {
           setSubjects(res.data.items);
@@ -143,6 +144,7 @@ export default function AdminSubjectsPage() {
           setTotalPages(1);
         }
       } catch (err: any) {
+        if (isRequestCancelled(err)) return;
         const errMsg = err?.response?.data?.detail || err?.message || 'Failed to load subjects.';
         setError(errMsg);
       } finally {
@@ -154,11 +156,19 @@ export default function AdminSubjectsPage() {
   );
 
   useEffect(() => {
-    fetchSummary();
+    const controller = new AbortController();
+    fetchSummary(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchSummary]);
 
   useEffect(() => {
-    fetchSubjects();
+    const controller = new AbortController();
+    fetchSubjects(false, controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchSubjects]);
 
   // Load active lecturers for assignment dropdown
@@ -171,7 +181,8 @@ export default function AdminSubjectsPage() {
       if (items.length > 0) {
         setSelectedLecturerId(items[0].id);
       }
-    } catch {
+    } catch (err: unknown) {
+      if (isRequestCancelled(err)) return;
       toast.error('Failed to load active lecturers list.');
     } finally {
       setLecturersLoading(false);
@@ -206,6 +217,7 @@ export default function AdminSubjectsPage() {
       const res = await api.get<SubjectDetailResponse>(`/api/admin/subjects/${id}`);
       setSelectedSubjectDetail(res.data);
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       toast.error(err?.response?.data?.detail || 'Failed to load subject details.');
       setShowViewModal(false);
     } finally {

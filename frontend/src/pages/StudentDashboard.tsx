@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import api from '../services/api';
+import api, { isRequestCancelled } from '../services/api';
 import type { StudentDashboardData } from '../types';
 import { DashboardSkeleton } from '../components/Skeleton';
 import ErrorState from '../components/ErrorState';
@@ -25,20 +25,27 @@ export default function StudentDashboard() {
   const [error, setError] = useState('');
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
 
-  const fetchDashboard = async () => {
+  const fetchDashboard = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError('');
     try {
-      const res = await api.get('/api/dashboard/student');
+      const res = await api.get<StudentDashboardData>('/api/dashboard/student', { signal });
       setData(res.data);
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       setError(err.response?.data?.detail || 'Failed to load dashboard');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchDashboard(); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchDashboard(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [fetchDashboard]);
 
   if (loading) return <DashboardSkeleton />;
   if (error) return <ErrorState message={error} onRetry={fetchDashboard} />;

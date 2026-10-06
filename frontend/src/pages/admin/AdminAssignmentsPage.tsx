@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import api from '../../services/api';
+import api, { isRequestCancelled } from '../../services/api';
 import type {
   LecturerAssignmentItem,
   AssignmentSummaryMetrics,
@@ -73,12 +73,13 @@ export default function AdminAssignmentsPage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Fetch summary statistics
-  const fetchSummary = useCallback(async () => {
+  const fetchSummary = useCallback(async (signal?: AbortSignal) => {
     setSummaryLoading(true);
     try {
-      const res = await api.get<AssignmentSummaryMetrics>('/api/admin/assignments/summary');
+      const res = await api.get<AssignmentSummaryMetrics>('/api/admin/assignments/summary', { signal });
       setSummary(res.data);
-    } catch {
+    } catch (err: unknown) {
+      if (isRequestCancelled(err)) return;
       // Don't break page on summary failure
     } finally {
       setSummaryLoading(false);
@@ -87,7 +88,7 @@ export default function AdminAssignmentsPage() {
 
   // Fetch assignments table data
   const fetchAssignments = useCallback(
-    async (isManualRefresh = false) => {
+    async (isManualRefresh = false, signal?: AbortSignal) => {
       if (isManualRefresh) setRefreshing(true);
       else setLoading(true);
       setError(null);
@@ -101,7 +102,7 @@ export default function AdminAssignmentsPage() {
         if (search.trim()) params.search = search.trim();
         if (deptFilter.trim()) params.department = deptFilter.trim();
 
-        const res = await api.get<AssignmentListResponse>('/api/admin/assignments', { params });
+        const res = await api.get<AssignmentListResponse>('/api/admin/assignments', { params, signal });
 
         if (res.data && Array.isArray(res.data.items)) {
           setAssignments(res.data.items);
@@ -113,6 +114,7 @@ export default function AdminAssignmentsPage() {
           setTotalPages(1);
         }
       } catch (err: any) {
+        if (isRequestCancelled(err)) return;
         const errMsg = err?.response?.data?.detail || err?.message || 'Failed to load assignments.';
         setError(errMsg);
       } finally {
@@ -124,11 +126,19 @@ export default function AdminAssignmentsPage() {
   );
 
   useEffect(() => {
-    fetchSummary();
+    const controller = new AbortController();
+    fetchSummary(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchSummary]);
 
   useEffect(() => {
-    fetchAssignments();
+    const controller = new AbortController();
+    fetchAssignments(false, controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchAssignments]);
 
   // Load dropdown lists for New Assignment modal
@@ -148,7 +158,8 @@ export default function AdminAssignmentsPage() {
 
       if (lecs.length > 0) setSelectedLecturerId(lecs[0].id);
       if (subs.length > 0) setSelectedSubjectId(subs[0].id);
-    } catch {
+    } catch (err: unknown) {
+      if (isRequestCancelled(err)) return;
       toast.error('Failed to load faculty or course lists.');
     } finally {
       setDropdownsLoading(false);

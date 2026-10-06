@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+import api, { isRequestCancelled } from '../../services/api';
 import type { AdminDashboardData } from '../../types';
 import { DashboardSkeleton } from '../../components/Skeleton';
 import ErrorState from '../../components/ErrorState';
@@ -41,7 +41,7 @@ export default function AdminDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchDashboardData = useCallback(async (isManualRefresh = false) => {
+  const fetchDashboardData = useCallback(async (isManualRefresh = false, signal?: AbortSignal) => {
     if (isManualRefresh) {
       setRefreshing(true);
     } else {
@@ -51,9 +51,10 @@ export default function AdminDashboardPage() {
 
     try {
       // Use existing API service with authentication interceptor
-      const res = await api.get<AdminDashboardData>('/api/admin/dashboard');
+      const res = await api.get<AdminDashboardData>('/api/admin/dashboard', { signal });
       setData(res.data);
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       const msg =
         err.response?.data?.detail ||
         err.message ||
@@ -66,7 +67,11 @@ export default function AdminDashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchDashboardData();
+    const controller = new AbortController();
+    fetchDashboardData(false, controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchDashboardData]);
 
   const getGreeting = () => {

@@ -16,8 +16,13 @@ from app.api import auth, students, subjects, attendance, dashboard, notificatio
 
 settings = get_settings()
 
-# Create tables
+# Create tables and synchronize schema
 Base.metadata.create_all(bind=engine)
+try:
+    from migrate_account_model import run_migration
+    run_migration(engine)
+except Exception as e:
+    print(f"[STARTUP WARNING] Automated schema sync notice: {e}")
 
 app = FastAPI(
     title="AttendX API",
@@ -46,12 +51,18 @@ for o in raw_origins:
         if cleaned and cleaned not in origins:
             origins.append(cleaned)
 
+from app.core.observability import RequestTimingMiddleware
+
+# Module 8 — Structured Request Timing & Correlation Middleware
+app.add_middleware(RequestTimingMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 
 
@@ -85,15 +96,20 @@ def api_health():
 # Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
+    headers = {"X-Request-ID": req_id} if req_id else {}
     if isinstance(exc, StarletteHTTPException):
+        if getattr(exc, "headers", None):
+            headers.update(exc.headers)
         return JSONResponse(
             status_code=exc.status_code,
             content={"detail": exc.detail},
-            headers=getattr(exc, "headers", None),
+            headers=headers,
         )
     return JSONResponse(
         status_code=500,
         content={"detail": "An internal server error occurred. Please try again later."},
+        headers=headers,
     )
 
 

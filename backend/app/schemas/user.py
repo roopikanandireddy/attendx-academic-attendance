@@ -41,6 +41,13 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if not v:
+            raise ValueError("Password is required")
+        return v
+
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None

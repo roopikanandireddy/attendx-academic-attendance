@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import api from '../services/api';
+import { useEffect, useState, useCallback } from 'react';
+import api, { isRequestCancelled } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import ErrorState from '../components/ErrorState';
@@ -13,19 +13,26 @@ export default function MyAttendancePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setError('');
     try {
-      const res = await api.get('/api/dashboard/student');
+      const res = await api.get('/api/dashboard/student', { signal });
       setData(res.data);
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       setError(err.response?.data?.detail || 'Failed to load data');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchData(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [fetchData]);
 
   if (loading) return <LoadingSpinner text="Loading attendance..." />;
   if (error) return <ErrorState message={error} onRetry={fetchData} />;

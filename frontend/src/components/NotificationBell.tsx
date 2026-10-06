@@ -14,6 +14,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import notificationService from '../services/notificationService';
+import { isRequestCancelled } from '../services/api';
 import type { NotificationItem, NotificationType } from '../types';
 import toast from 'react-hot-toast';
 
@@ -114,42 +115,54 @@ export default function NotificationBell() {
   };
 
   // Fetch unread count
-  const fetchUnreadCount = useCallback(async () => {
+  const fetchUnreadCount = useCallback(async (signal?: AbortSignal) => {
     try {
-      const count = await notificationService.getUnreadNotificationCount();
+      const count = await notificationService.getUnreadNotificationCount({ signal });
       setUnreadCount(count);
-    } catch {
+    } catch (err) {
+      if (isRequestCancelled(err)) return;
       // Ignore background count errors
     }
   }, []);
 
   // Fetch notifications list
-  const fetchNotifications = useCallback(async (isInitial = true) => {
+  const fetchNotifications = useCallback(async (isInitial = true, signal?: AbortSignal) => {
     if (isInitial) setLoading(true);
     setError(false);
     try {
-      const data = await notificationService.getNotifications(50, 1);
+      const data = await notificationService.getNotifications(50, 1, undefined, undefined, { signal });
       setNotifications(data);
       const unread = data.filter((n) => !n.is_read).length;
       setUnreadCount(unread);
-    } catch {
+    } catch (err) {
+      if (isRequestCancelled(err)) return;
       setError(true);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Initial count load & 30s background poll
+  // Initial count load & 30s background poll with cleanup
   useEffect(() => {
-    fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000);
-    return () => clearInterval(interval);
+    const controller = new AbortController();
+    fetchUnreadCount(controller.signal);
+    const interval = setInterval(() => {
+      fetchUnreadCount();
+    }, 30000);
+    return () => {
+      controller.abort();
+      clearInterval(interval);
+    };
   }, [fetchUnreadCount]);
 
-  // When dropdown opens, fetch latest notifications
+  // When dropdown opens, fetch latest notifications with cleanup
   useEffect(() => {
     if (isOpen) {
-      fetchNotifications();
+      const controller = new AbortController();
+      fetchNotifications(true, controller.signal);
+      return () => {
+        controller.abort();
+      };
     }
   }, [isOpen, fetchNotifications]);
 

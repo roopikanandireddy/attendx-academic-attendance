@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { GraduationCap, Lock, Eye, EyeOff, CheckCircle2, AlertTriangle, ArrowRight, Loader2, KeyRound } from 'lucide-react';
-import api from '../services/api';
+import api, { isRequestCancelled } from '../services/api';
 import toast from 'react-hot-toast';
 
 export default function ResetPasswordPage() {
@@ -27,13 +27,18 @@ export default function ResetPasswordPage() {
       return;
     }
 
+    const controller = new AbortController();
+
     const verify = async () => {
       try {
         setVerifying(true);
-        const res = await api.get(`/api/auth/verify-reset-token?token=${encodeURIComponent(token)}`);
+        const res = await api.get(`/api/auth/verify-reset-token?token=${encodeURIComponent(token)}`, {
+          signal: controller.signal,
+        });
         setAccountEmail(res.data.email || '');
         setTokenError(null);
       } catch (err: any) {
+        if (isRequestCancelled(err)) return;
         const msg = err.response?.data?.detail || 'Reset link is invalid, expired, or has already been used.';
         setTokenError(msg);
       } finally {
@@ -42,6 +47,10 @@ export default function ResetPasswordPage() {
     };
 
     verify();
+
+    return () => {
+      controller.abort();
+    };
   }, [token]);
 
   const validate = () => {

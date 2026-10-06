@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import api from '../services/api';
+import api, { isRequestCancelled } from '../services/api';
 import type { Subject } from '../types';
 import Modal from './Modal';
 import LoadingSpinner from './LoadingSpinner';
@@ -30,17 +30,15 @@ export default function EnrollSubjectsModal({
   useEffect(() => {
     if (!isOpen) return;
 
-    let isMounted = true;
+    const controller = new AbortController();
     setLoading(true);
     setError('');
 
     Promise.all([
-      api.get<Subject[]>('/api/subjects'),
-      api.get<string[]>('/api/subjects/my-enrollments'),
+      api.get<Subject[]>('/api/subjects', { signal: controller.signal }),
+      api.get<string[]>('/api/subjects/my-enrollments', { signal: controller.signal }),
     ])
       .then(([subjectsRes, enrollmentsRes]) => {
-        if (!isMounted) return;
-
         // Sort subjects in the catalog order
         const sorted = [...subjectsRes.data].sort((a, b) => {
           const idxA = PREFERRED_ORDER.indexOf(a.code);
@@ -59,15 +57,15 @@ export default function EnrollSubjectsModal({
         setSelectedIds(new Set(currentEnrolled));
       })
       .catch((err: any) => {
-        if (!isMounted) return;
+        if (isRequestCancelled(err)) return;
         setError(err.response?.data?.detail || 'Failed to load subject catalog');
       })
       .finally(() => {
-        if (isMounted) setLoading(false);
+        setLoading(false);
       });
 
     return () => {
-      isMounted = false;
+      controller.abort();
     };
   }, [isOpen]);
 

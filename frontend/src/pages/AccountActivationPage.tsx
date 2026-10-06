@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { GraduationCap, Lock, Eye, EyeOff, CheckCircle2, AlertTriangle, ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
-import api from '../services/api';
+import api, { isRequestCancelled } from '../services/api';
 import toast from 'react-hot-toast';
 
 export default function AccountActivationPage() {
@@ -31,10 +31,14 @@ export default function AccountActivationPage() {
       return;
     }
 
+    const controller = new AbortController();
+
     const verify = async () => {
       try {
         setVerifying(true);
-        const res = await api.get(`/api/auth/verify-activation-token?token=${encodeURIComponent(token)}`);
+        const res = await api.get(`/api/auth/verify-activation-token?token=${encodeURIComponent(token)}`, {
+          signal: controller.signal,
+        });
         setAccountInfo({
           email: res.data.email || '',
           full_name: res.data.full_name || '',
@@ -42,6 +46,7 @@ export default function AccountActivationPage() {
         });
         setTokenError(null);
       } catch (err: any) {
+        if (isRequestCancelled(err)) return;
         const msg = err.response?.data?.detail || 'Activation link is invalid, expired, or has already been used.';
         setTokenError(msg);
       } finally {
@@ -50,6 +55,10 @@ export default function AccountActivationPage() {
     };
 
     verify();
+
+    return () => {
+      controller.abort();
+    };
   }, [token]);
 
   const validate = () => {

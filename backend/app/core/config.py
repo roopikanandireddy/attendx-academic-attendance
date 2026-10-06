@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     ADMIN_1_PASSWORD: str = ""
     ADMIN_2_PASSWORD: str = ""
 
+    # Module 8 — Observability & Request Timing Configuration
+    SLOW_REQUEST_THRESHOLD_MS: float = 1000.0
+    ENABLE_STRUCTURED_LOGGING: bool = True
+
     @model_validator(mode="after")
     def validate_production_secrets(self):
         is_production = os.getenv("RENDER") == "true" or os.getenv("ENVIRONMENT") == "production"

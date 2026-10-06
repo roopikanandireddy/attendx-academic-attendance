@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import api from '../../services/api';
+import api, { isRequestCancelled } from '../../services/api';
 import type {
   LecturerAssignedSubjectItem,
   LecturerAttendanceSessionResponse,
@@ -44,16 +44,17 @@ export default function LecturerAttendancePage() {
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 
   // 1. Fetch assigned subjects for current lecturer
-  const fetchAssignedSubjects = useCallback(async () => {
+  const fetchAssignedSubjects = useCallback(async (signal?: AbortSignal) => {
     setLoadingSubjects(true);
     setError(null);
     try {
-      const res = await api.get<LecturerAssignedSubjectItem[]>('/api/lecturer/subjects');
+      const res = await api.get<LecturerAssignedSubjectItem[]>('/api/lecturer/subjects', { signal });
       setSubjects(res.data);
       if (res.data.length > 0 && !selectedSubjectId) {
         setSelectedSubjectId(res.data[0].id);
       }
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       setError(
         err.response?.data?.detail ||
           'Failed to load your assigned subjects. Please try again.'
@@ -64,11 +65,15 @@ export default function LecturerAttendancePage() {
   }, [selectedSubjectId]);
 
   useEffect(() => {
-    fetchAssignedSubjects();
+    const controller = new AbortController();
+    fetchAssignedSubjects(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchAssignedSubjects]);
 
   // 2. Fetch session roster and existing attendance
-  const fetchSession = useCallback(async () => {
+  const fetchSession = useCallback(async (signal?: AbortSignal) => {
     if (!selectedSubjectId || !selectedDate) return;
     setLoadingSession(true);
     try {
@@ -79,6 +84,7 @@ export default function LecturerAttendancePage() {
             subject_id: selectedSubjectId,
             attendance_date: selectedDate,
           },
+          signal,
         }
       );
       setSessionData(res.data);
@@ -92,6 +98,7 @@ export default function LecturerAttendancePage() {
       });
       setStudentStatuses(initialMap);
     } catch (err: any) {
+      if (isRequestCancelled(err)) return;
       toast.error(err.response?.data?.detail || 'Failed to load class roster for this session');
     } finally {
       setLoadingSession(false);
@@ -100,7 +107,11 @@ export default function LecturerAttendancePage() {
 
   useEffect(() => {
     if (selectedSubjectId && selectedDate) {
-      fetchSession();
+      const controller = new AbortController();
+      fetchSession(controller.signal);
+      return () => {
+        controller.abort();
+      };
     }
   }, [fetchSession, selectedSubjectId, selectedDate]);
 
@@ -242,7 +253,7 @@ export default function LecturerAttendancePage() {
         </div>
 
         <button
-          onClick={fetchSession}
+          onClick={() => fetchSession()}
           disabled={loadingSession || !selectedSubjectId}
           className="btn btn-secondary text-xs flex items-center gap-1.5 self-start sm:self-auto"
           title="Refresh current session data"

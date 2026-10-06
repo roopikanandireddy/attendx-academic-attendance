@@ -17,6 +17,7 @@ CREATE TABLE users (
     year INTEGER CHECK (year >= 1 AND year <= 6),
     section VARCHAR(10),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    account_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (account_status IN ('ACTIVE', 'PENDING_ACTIVATION', 'SUSPENDED', 'INVITED', 'DISABLED')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -75,12 +76,26 @@ CREATE TABLE notifications (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Account activation and security tokens table
+CREATE TABLE account_activation_tokens (
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) NOT NULL,
+    token_type VARCHAR(20) NOT NULL DEFAULT 'activation' CHECK (token_type IN ('activation', 'password_reset')),
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Indexes for performance
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX idx_users_account_status ON users(account_status);
 CREATE INDEX idx_users_department ON users(department);
 CREATE INDEX idx_users_student_id ON users(student_id);
 CREATE INDEX idx_users_employee_id ON users(employee_id);
+CREATE INDEX idx_account_tokens_token_hash ON account_activation_tokens(token_hash);
+CREATE INDEX idx_account_tokens_user_id ON account_activation_tokens(user_id);
 CREATE INDEX idx_subjects_code ON subjects(code);
 CREATE INDEX idx_subjects_department ON subjects(department);
 CREATE INDEX idx_subjects_year ON subjects(year);

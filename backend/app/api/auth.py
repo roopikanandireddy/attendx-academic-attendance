@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token, get_current_user
 from app.models.user import User
@@ -27,6 +28,9 @@ from app.services.notification_service import (
     create_faculty_welcome_notification,
 )
 
+# Precomputed dummy bcrypt hash with 12 rounds for timing attack equalization
+DUMMY_BCRYPT_HASH = "$2b$12$6zP1dMsjuljG4BF9bWGAiOdFwbBUwoGd9SxSSvp7Rdlx4qy5uRvvi"
+
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 
@@ -49,30 +53,43 @@ def register(data: UserRegister, db: Session = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse, summary="Login with email and password")
 def login(data: UserLogin, db: Session = Depends(get_db)):
     """Authenticate user and return JWT token."""
-    user = db.query(User).filter(User.email == data.email.lower().strip()).first()
+    normalized_email = data.email.lower().strip()
+
+    try:
+        user = db.query(User).filter(User.email == normalized_email).first()
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to sign in right now. Please try again.",
+        )
+
     if not user:
+        # Perform dummy password verification to equalize timing and prevent email enumeration
+        verify_password(data.password, DUMMY_BCRYPT_HASH)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
-    # Check if user account is in INVITED state
+    # Check if user account is in INVITED state (pending activation)
     if user.account_status and user.account_status.upper() == "INVITED":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your account is pending activation. Please check your email for the activation link.",
         )
 
-    if not verify_password(data.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
-
+    # Check if account is disabled or suspended
     if not user.is_active or (user.account_status and user.account_status.upper() in ("DISABLED", "SUSPENDED")):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is disabled. Please contact an administrator.",
+        )
+
+    # Verify password (performed exactly once)
+    if not verify_password(data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
         )
 
     token = create_access_token({"sub": user.id, "role": user.role})

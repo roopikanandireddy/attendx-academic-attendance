@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { Link, Navigate, useSearchParams } from 'react-router-dom';
+import { useState, useRef } from 'react';
+import { Link, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { GraduationCap, BookOpen, ShieldCheck, Mail, Lock, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function LoginPage() {
   const { user, login, logout } = useAuth();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const roleParam = searchParams.get('role')?.toLowerCase();
 
@@ -13,6 +14,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const isSubmittingRef = useRef(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Only redirect if user's existing session already matches the requested role (or if no specific role was requested)
@@ -73,23 +75,71 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingRef.current || loading) return;
     if (!validate()) return;
 
+    isSubmittingRef.current = true;
     setLoading(true);
     try {
-      await login(email, password);
+      const loggedInUser = await login(email, password);
       toast.success('Welcome back!');
-    } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      let msg = 'Invalid email or password';
-      if (typeof detail === 'string') {
-        msg = detail;
-      } else if (Array.isArray(detail)) {
-        msg = detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ');
+      if (loggedInUser.role === 'admin') {
+        navigate('/admin/dashboard', { replace: true });
+      } else if (loggedInUser.role === 'lecturer') {
+        navigate('/lecturer/dashboard', { replace: true });
+      } else {
+        navigate('/dashboard', { replace: true });
       }
+    } catch (err: any) {
+      let msg = 'Unable to sign in right now. Please try again.';
+
+      // Case 9: Network timeout or connection offline
+      if (err.code === 'ECONNABORTED' || err.message?.toLowerCase().includes('timeout')) {
+        msg = 'Unable to reach the server. Please check your connection and try again.';
+      } else if (!err.response) {
+        msg = 'Unable to reach the server. Please check your connection and try again.';
+      } else {
+        const status = err.response.status;
+        const detail = err.response.data?.detail;
+
+        if (status === 401) {
+          // Case 2 & Case 3: Unknown email or wrong password
+          msg = 'Invalid email or password';
+        } else if (status === 403) {
+          // Case 4 & Case 5: Account pending activation or disabled/suspended
+          if (typeof detail === 'string') {
+            msg = detail;
+          } else {
+            msg = 'Access denied. Please check your account status or contact an administrator.';
+          }
+        } else if (status === 422) {
+          // Case 6: Schema validation error / malformed request
+          if (typeof detail === 'string') {
+            msg = detail;
+          } else if (Array.isArray(detail)) {
+            msg = detail.map((d: any) => d.msg || d.message || JSON.stringify(d)).join(', ');
+          } else {
+            msg = 'Please check your input and provide a valid email and password.';
+          }
+        } else if (status === 502 || status === 503) {
+          // Case 8: Infrastructure cold boot / Service unavailable
+          msg = 'Authentication service is temporarily unavailable. Please try again.';
+        } else if (status === 500) {
+          // Case 7: Database failure or server error
+          if (typeof detail === 'string' && detail !== 'Internal Server Error') {
+            msg = detail;
+          } else {
+            msg = 'Unable to sign in right now. Please try again.';
+          }
+        } else if (typeof detail === 'string') {
+          msg = detail;
+        }
+      }
+
       toast.error(msg);
     } finally {
       setLoading(false);
+      isSubmittingRef.current = false;
     }
   };
 
@@ -195,7 +245,14 @@ export default function LoginPage() {
             </div>
 
             <button type="submit" className="btn btn-primary w-full btn-lg" disabled={loading}>
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Sign In'}
+              {loading ? (
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Signing In...</span>
+                </span>
+              ) : (
+                'Sign In'
+              )}
             </button>
           </form>
 

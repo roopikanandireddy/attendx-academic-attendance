@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import api from '../../services/api';
+import api, { isRequestCancelled } from '../../services/api';
 import type {
   LecturerListItem,
   LecturerSummaryMetrics,
@@ -89,12 +89,13 @@ export default function AdminLecturersPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   // Fetch summary statistics
-  const fetchSummary = useCallback(async () => {
+  const fetchSummary = useCallback(async (signal?: AbortSignal) => {
     setSummaryLoading(true);
     try {
-      const res = await api.get<LecturerSummaryMetrics>('/api/admin/lecturers/summary');
+      const res = await api.get<LecturerSummaryMetrics>('/api/admin/lecturers/summary', { signal });
       setSummary(res.data);
-    } catch {
+    } catch (err) {
+      if (isRequestCancelled(err)) return;
       // Don't break page if summary endpoint fails
     } finally {
       setSummaryLoading(false);
@@ -103,7 +104,7 @@ export default function AdminLecturersPage() {
 
   // Fetch lecturers table data
   const fetchLecturers = useCallback(
-    async (isManualRefresh = false) => {
+    async (isManualRefresh = false, signal?: AbortSignal) => {
       if (isManualRefresh) {
         setRefreshing(true);
       } else {
@@ -122,7 +123,7 @@ export default function AdminLecturersPage() {
         if (deptFilter.trim()) params.department = deptFilter.trim();
         if (assignmentFilter !== 'all') params.assignment_status = assignmentFilter;
 
-        const res = await api.get<LecturerListResponse | LecturerListItem[]>('/api/admin/lecturers', { params });
+        const res = await api.get<LecturerListResponse | LecturerListItem[]>('/api/admin/lecturers', { params, signal });
 
         if (Array.isArray(res.data)) {
           setLecturers(res.data);
@@ -138,6 +139,7 @@ export default function AdminLecturersPage() {
           setTotalPages(1);
         }
       } catch (err: any) {
+        if (isRequestCancelled(err)) return;
         const errMsg = err?.response?.data?.detail || err?.message || 'Failed to load lecturers.';
         setError(errMsg);
       } finally {
@@ -149,11 +151,19 @@ export default function AdminLecturersPage() {
   );
 
   useEffect(() => {
-    fetchSummary();
+    const controller = new AbortController();
+    fetchSummary(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchSummary]);
 
   useEffect(() => {
-    fetchLecturers();
+    const controller = new AbortController();
+    fetchLecturers(false, controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [fetchLecturers]);
 
   // Reset pagination on filter change

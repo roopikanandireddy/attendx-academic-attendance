@@ -44,55 +44,54 @@ def student_dashboard(
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="Student access only")
 
-    # Get enrolled subjects
-    enrollments = db.query(StudentSubject).filter(
-        StudentSubject.student_id == current_user.id
-    ).all()
-    subject_ids = [e.subject_id for e in enrollments]
+    # 1. Single set-based query for all enrolled subjects with attendance counts
+    sub_rows = (
+        db.query(
+            Subject.id.label("subject_id"),
+            Subject.name.label("subject_name"),
+            Subject.code.label("subject_code"),
+            func.count(Attendance.id).label("total_classes"),
+            func.coalesce(func.sum(case((Attendance.status == "present", 1), else_=0)), 0).label("present"),
+        )
+        .join(StudentSubject, StudentSubject.subject_id == Subject.id)
+        .outerjoin(
+            Attendance,
+            (Attendance.subject_id == Subject.id) & (Attendance.student_id == current_user.id),
+        )
+        .filter(StudentSubject.student_id == current_user.id)
+        .group_by(Subject.id, Subject.name, Subject.code)
+        .all()
+    )
 
-    # Overall stats
     total_classes = 0
     total_present = 0
     total_absent = 0
     subjects_stats = []
     low_attendance_subjects = []
 
-    for subject_id in subject_ids:
-        subject = db.query(Subject).filter(Subject.id == subject_id).first()
-        if not subject:
-            continue
+    for r in sub_rows:
+        sub_tot = r.total_classes
+        sub_pres = int(r.present)
+        sub_abs = sub_tot - sub_pres
+        sub_pct = round((sub_pres / sub_tot * 100), 1) if sub_tot > 0 else 0.0
 
-        sub_total = db.query(func.count(Attendance.id)).filter(
-            Attendance.student_id == current_user.id,
-            Attendance.subject_id == subject_id,
-        ).scalar() or 0
-
-        sub_present = db.query(func.count(Attendance.id)).filter(
-            Attendance.student_id == current_user.id,
-            Attendance.subject_id == subject_id,
-            Attendance.status == "present",
-        ).scalar() or 0
-
-        sub_absent = sub_total - sub_present
-        sub_percentage = round((sub_present / sub_total * 100), 1) if sub_total > 0 else 0.0
-
-        total_classes += sub_total
-        total_present += sub_present
-        total_absent += sub_absent
+        total_classes += sub_tot
+        total_present += sub_pres
+        total_absent += sub_abs
 
         stat = {
-            "subject_id": subject_id,
-            "subject_name": subject.name,
-            "subject_code": subject.code,
-            "total_classes": sub_total,
-            "present": sub_present,
-            "absent": sub_absent,
-            "percentage": sub_percentage,
+            "subject_id": r.subject_id,
+            "subject_name": r.subject_name,
+            "subject_code": r.subject_code,
+            "total_classes": sub_tot,
+            "present": sub_pres,
+            "absent": sub_abs,
+            "percentage": sub_pct,
         }
         subjects_stats.append(stat)
 
-        if sub_total > 0 and sub_percentage < LOW_ATTENDANCE_THRESHOLD:
-            classes_needed = calculate_classes_needed(sub_present, sub_total)
+        if sub_tot > 0 and sub_pct < LOW_ATTENDANCE_THRESHOLD:
+            classes_needed = calculate_classes_needed(sub_pres, sub_tot)
             low_attendance_subjects.append({
                 **stat,
                 "classes_needed": classes_needed,
@@ -103,21 +102,32 @@ def student_dashboard(
 
     overall_percentage = round((total_present / total_classes * 100), 1) if total_classes > 0 else 0.0
 
-    # Recent attendance (last 10)
-    recent = db.query(Attendance).filter(
-        Attendance.student_id == current_user.id
-    ).order_by(Attendance.attendance_date.desc()).limit(10).all()
+    # 2. Single set-based query for recent attendance (last 10) with Subject outerjoin
+    recent_rows = (
+        db.query(
+            Attendance.id,
+            Attendance.attendance_date,
+            Attendance.status,
+            Subject.name.label("subject_name"),
+            Subject.code.label("subject_code"),
+        )
+        .outerjoin(Subject, Attendance.subject_id == Subject.id)
+        .filter(Attendance.student_id == current_user.id)
+        .order_by(Attendance.attendance_date.desc(), Attendance.created_at.desc())
+        .limit(10)
+        .all()
+    )
 
-    recent_attendance = []
-    for r in recent:
-        subject = db.query(Subject).filter(Subject.id == r.subject_id).first()
-        recent_attendance.append({
+    recent_attendance = [
+        {
             "id": r.id,
-            "subject_name": subject.name if subject else "Unknown",
-            "subject_code": subject.code if subject else "",
+            "subject_name": r.subject_name if r.subject_name else "Unknown",
+            "subject_code": r.subject_code if r.subject_code else "",
             "attendance_date": r.attendance_date.isoformat(),
             "status": r.status,
-        })
+        }
+        for r in recent_rows
+    ]
 
     return {
         "user": {
@@ -143,38 +153,54 @@ def student_dashboard(
 
 def get_admin_dashboard_data(current_user: User, db: Session) -> dict:
     """Calculate and return comprehensive database-driven metrics for the Admin Dashboard."""
-    total_students = db.query(func.count(User.id)).filter(User.role == "student").scalar() or 0
-    total_lecturers = db.query(func.count(User.id)).filter(User.role == "lecturer").scalar() or 0
+    today = date.today()
+
+    # 1. Total counts by role in 1 query
+    role_counts = dict(
+        db.query(User.role, func.count(User.id))
+        .filter(User.role.in_(["student", "lecturer"]))
+        .group_by(User.role)
+        .all()
+    )
+    total_students = role_counts.get("student", 0)
+    total_lecturers = role_counts.get("lecturer", 0)
+
+    # 2. Total subjects in 1 query
     total_subjects = db.query(func.count(Subject.id)).scalar() or 0
 
-    # Today's attendance
-    today = date.today()
-    todays_total = db.query(func.count(Attendance.id)).filter(
-        Attendance.attendance_date == today
-    ).scalar() or 0
-    todays_present = db.query(func.count(Attendance.id)).filter(
-        Attendance.attendance_date == today,
-        Attendance.status == "present",
-    ).scalar() or 0
+    # 3. Today's attendance in 1 query
+    todays_stats = db.query(
+        func.count(Attendance.id).label("total"),
+        func.coalesce(func.sum(case((Attendance.status == "present", 1), else_=0)), 0).label("present")
+    ).filter(Attendance.attendance_date == today).first()
+    todays_total = todays_stats.total if todays_stats else 0
+    todays_present = int(todays_stats.present) if todays_stats else 0
     todays_absent = todays_total - todays_present
     todays_percentage = round((todays_present / todays_total * 100), 1) if todays_total > 0 else 0.0
 
-    # Overall average attendance
-    all_total = db.query(func.count(Attendance.id)).scalar() or 0
-    all_present = db.query(func.count(Attendance.id)).filter(
-        Attendance.status == "present"
-    ).scalar() or 0
+    # 4. Overall average attendance in 1 query
+    all_stats = db.query(
+        func.count(Attendance.id).label("total"),
+        func.coalesce(func.sum(case((Attendance.status == "present", 1), else_=0)), 0).label("present")
+    ).first()
+    all_total = all_stats.total if all_stats else 0
+    all_present = int(all_stats.present) if all_stats else 0
     avg_attendance = round((all_present / all_total * 100), 1) if all_total > 0 else 0.0
 
-    # Recent attendance records (last 10)
+    # 5. Recent attendance records (last 10) - batch user and subject lookup
     recent = db.query(Attendance).order_by(
         Attendance.attendance_date.desc(), Attendance.created_at.desc()
     ).limit(10).all()
 
+    student_ids = {r.student_id for r in recent}
+    subject_ids = {r.subject_id for r in recent}
+    student_map = {u.id: u for u in db.query(User).filter(User.id.in_(student_ids)).all()} if student_ids else {}
+    subject_map = {s.id: s for s in db.query(Subject).filter(Subject.id.in_(subject_ids)).all()} if subject_ids else {}
+
     recent_attendance = []
     for r in recent:
-        student = db.query(User).filter(User.id == r.student_id).first()
-        subject = db.query(Subject).filter(Subject.id == r.subject_id).first()
+        student = student_map.get(r.student_id)
+        subject = subject_map.get(r.subject_id)
         att_date_str = r.attendance_date.isoformat() if hasattr(r.attendance_date, "isoformat") else str(r.attendance_date)
         recent_attendance.append({
             "id": r.id,
@@ -186,42 +212,68 @@ def get_admin_dashboard_data(current_user: User, db: Session) -> dict:
             "status": r.status,
         })
 
-    # Low-attendance students (below 75%)
-    students = db.query(User).filter(User.role == "student").all()
+    # 6. Low-attendance students (below 75%)
+    # Aggregate attendance by student across all students in 1 query
+    student_att_stats = (
+        db.query(
+            Attendance.student_id,
+            func.count(Attendance.id).label("total"),
+            func.coalesce(func.sum(case((Attendance.status == "present", 1), else_=0)), 0).label("present")
+        )
+        .group_by(Attendance.student_id)
+        .all()
+    )
+
+    low_att_student_ids = []
+    student_overall_stats = {}
+    for stat in student_att_stats:
+        tot = stat.total
+        pres = int(stat.present)
+        pct = round((pres / tot * 100), 1) if tot > 0 else 0.0
+        if tot > 0 and pct < LOW_ATTENDANCE_THRESHOLD:
+            low_att_student_ids.append(stat.student_id)
+            student_overall_stats[stat.student_id] = (tot, pres, pct)
+
     low_attendance_students = []
-    for student in students:
-        s_total = db.query(func.count(Attendance.id)).filter(
-            Attendance.student_id == student.id
-        ).scalar() or 0
-        if s_total == 0:
-            continue
-        s_present = db.query(func.count(Attendance.id)).filter(
-            Attendance.student_id == student.id,
-            Attendance.status == "present",
-        ).scalar() or 0
-        s_percentage = round((s_present / s_total * 100), 1)
-        if s_percentage < LOW_ATTENDANCE_THRESHOLD:
-            # Determine lowest/primary subject
-            enrollments = db.query(StudentSubject).filter(StudentSubject.student_id == student.id).all()
+    if low_att_student_ids:
+        # Fetch students preserving original iteration order
+        all_students = db.query(User).filter(User.role == "student").all()
+        students = [s for s in all_students if s.id in student_overall_stats]
+
+        # Subject-level attendance breakdown for low attendance students in 1 query
+        sub_att_rows = (
+            db.query(
+                Attendance.student_id,
+                Attendance.subject_id,
+                func.count(Attendance.id).label("total"),
+                func.coalesce(func.sum(case((Attendance.status == "present", 1), else_=0)), 0).label("present"),
+                Subject.code,
+                Subject.name,
+            )
+            .join(Subject, Subject.id == Attendance.subject_id)
+            .filter(Attendance.student_id.in_(low_att_student_ids))
+            .group_by(Attendance.student_id, Attendance.subject_id, Subject.code, Subject.name)
+            .all()
+        )
+
+        student_sub_map = {}
+        for row in sub_att_rows:
+            student_sub_map.setdefault(row.student_id, []).append(row)
+
+        for student in students:
+            s_total, s_present, s_percentage = student_overall_stats[student.id]
             lowest_subject_code = ""
             lowest_sub_pct = 100.0
-            for enr in enrollments:
-                sub_tot = db.query(func.count(Attendance.id)).filter(
-                    Attendance.student_id == student.id,
-                    Attendance.subject_id == enr.subject_id
-                ).scalar() or 0
+
+            sub_rows = student_sub_map.get(student.id, [])
+            for sub in sub_rows:
+                sub_tot = sub.total
                 if sub_tot > 0:
-                    sub_pres = db.query(func.count(Attendance.id)).filter(
-                        Attendance.student_id == student.id,
-                        Attendance.subject_id == enr.subject_id,
-                        Attendance.status == "present"
-                    ).scalar() or 0
+                    sub_pres = int(sub.present)
                     sub_pct = round((sub_pres / sub_tot * 100), 1)
                     if sub_pct < lowest_sub_pct:
                         lowest_sub_pct = sub_pct
-                        sub_obj = db.query(Subject).filter(Subject.id == enr.subject_id).first()
-                        if sub_obj:
-                            lowest_subject_code = sub_obj.code if sub_obj.code else sub_obj.name
+                        lowest_subject_code = sub.code if sub.code else sub.name
 
             low_attendance_students.append({
                 "id": student.id,
@@ -238,17 +290,20 @@ def get_admin_dashboard_data(current_user: User, db: Session) -> dict:
                 "classes_needed": calculate_classes_needed(s_present, s_total),
             })
 
-    # Subject-wise stats
+    # 7. Subject-wise stats
     subjects = db.query(Subject).all()
+    att_by_subject = {
+        row.subject_id: (row.total, int(row.present))
+        for row in db.query(
+            Attendance.subject_id,
+            func.count(Attendance.id).label("total"),
+            func.coalesce(func.sum(case((Attendance.status == "present", 1), else_=0)), 0).label("present")
+        ).group_by(Attendance.subject_id).all()
+    }
+
     subject_stats = []
     for subject in subjects:
-        sub_total = db.query(func.count(Attendance.id)).filter(
-            Attendance.subject_id == subject.id
-        ).scalar() or 0
-        sub_present = db.query(func.count(Attendance.id)).filter(
-            Attendance.subject_id == subject.id,
-            Attendance.status == "present",
-        ).scalar() or 0
+        sub_total, sub_present = att_by_subject.get(subject.id, (0, 0))
         sub_percentage = round((sub_present / sub_total * 100), 1) if sub_total > 0 else 0.0
         subject_stats.append({
             "subject_id": subject.id,
@@ -263,17 +318,24 @@ def get_admin_dashboard_data(current_user: User, db: Session) -> dict:
     catalog_order = ["IAI", "SE", "ISC", "BEFA", "ES", "AE-3 LAB"]
     subject_stats.sort(key=lambda s: catalog_order.index(s["subject_code"]) if s["subject_code"] in catalog_order else 999)
 
-    # Attendance trend (last 14 days)
+    # 8. Attendance trend (last 14 days)
+    start_date = today - timedelta(days=13)
+    trend_rows = (
+        db.query(
+            Attendance.attendance_date,
+            func.count(Attendance.id).label("total"),
+            func.coalesce(func.sum(case((Attendance.status == "present", 1), else_=0)), 0).label("present"),
+        )
+        .filter(Attendance.attendance_date >= start_date, Attendance.attendance_date <= today)
+        .group_by(Attendance.attendance_date)
+        .all()
+    )
+    trend_map = {row.attendance_date: (row.total, int(row.present)) for row in trend_rows}
+
     attendance_trend = []
     for i in range(13, -1, -1):
         d = today - timedelta(days=i)
-        d_total = db.query(func.count(Attendance.id)).filter(
-            Attendance.attendance_date == d
-        ).scalar() or 0
-        d_present = db.query(func.count(Attendance.id)).filter(
-            Attendance.attendance_date == d,
-            Attendance.status == "present",
-        ).scalar() or 0
+        d_total, d_present = trend_map.get(d, (0, 0))
         attendance_trend.append({
             "date": d.isoformat(),
             "total": d_total,
@@ -282,12 +344,20 @@ def get_admin_dashboard_data(current_user: User, db: Session) -> dict:
             "percentage": round((d_present / d_total * 100), 1) if d_total > 0 else 0,
         })
 
-    # Real recent system activity from database
-    raw_activities = []
+    # 9. Real recent system activity from database
     recent_att_records = db.query(Attendance).order_by(Attendance.created_at.desc()).limit(8).all()
+    recent_enrollments = db.query(StudentSubject).order_by(StudentSubject.created_at.desc()).limit(6).all()
+
+    act_user_ids = {ra.student_id for ra in recent_att_records} | {re.student_id for re in recent_enrollments}
+    act_subj_ids = {ra.subject_id for ra in recent_att_records} | {re.subject_id for re in recent_enrollments}
+
+    act_user_map = {u.id: u for u in db.query(User).filter(User.id.in_(act_user_ids)).all()} if act_user_ids else {}
+    act_subj_map = {s.id: s for s in db.query(Subject).filter(Subject.id.in_(act_subj_ids)).all()} if act_subj_ids else {}
+
+    raw_activities = []
     for ra in recent_att_records:
-        st = db.query(User).filter(User.id == ra.student_id).first()
-        sb = db.query(Subject).filter(Subject.id == ra.subject_id).first()
+        st = act_user_map.get(ra.student_id)
+        sb = act_subj_map.get(ra.subject_id)
         st_name = st.full_name if st else "Student"
         sb_name = sb.code if sb and sb.code else (sb.name if sb else "Subject")
         att_date_str = ra.attendance_date.isoformat() if hasattr(ra.attendance_date, "isoformat") else str(ra.attendance_date)
@@ -302,10 +372,9 @@ def get_admin_dashboard_data(current_user: User, db: Session) -> dict:
             "_sort_key": ra.created_at,
         })
 
-    recent_enrollments = db.query(StudentSubject).order_by(StudentSubject.created_at.desc()).limit(6).all()
     for re in recent_enrollments:
-        st = db.query(User).filter(User.id == re.student_id).first()
-        sb = db.query(Subject).filter(Subject.id == re.subject_id).first()
+        st = act_user_map.get(re.student_id)
+        sb = act_subj_map.get(re.subject_id)
         st_name = st.full_name if st else "Student"
         sb_name = sb.name if sb else "Subject"
         created_str = re.created_at.isoformat() if hasattr(re.created_at, "isoformat") else str(re.created_at)
@@ -436,33 +505,34 @@ def get_lecturer_dashboard_data(current_user: User, db: Session) -> dict:
         or 0
     )
 
-    # 4. Subject-wise metrics
+    # 4. Batch query enrolled students count grouped by subject_id
+    enrolled_counts = dict(
+        db.query(StudentSubject.subject_id, func.count(StudentSubject.id))
+        .filter(StudentSubject.subject_id.in_(assigned_subject_ids))
+        .group_by(StudentSubject.subject_id)
+        .all()
+    )
+
+    # 5. Batch query attendance stats grouped by subject_id
+    att_stats_by_subj = {
+        row.subject_id: (row.total, int(row.present))
+        for row in db.query(
+            Attendance.subject_id,
+            func.count(Attendance.id).label("total"),
+            func.coalesce(func.sum(case((Attendance.status == "present", 1), else_=0)), 0).label("present"),
+        )
+        .filter(Attendance.subject_id.in_(assigned_subject_ids))
+        .group_by(Attendance.subject_id)
+        .all()
+    }
+
     subjects_list = []
     total_attendance_records = 0
     total_present_records = 0
 
     for subject in subjects:
-        # Enrolled students for this specific subject
-        enrolled_count = (
-            db.query(func.count(StudentSubject.id))
-            .filter(StudentSubject.subject_id == subject.id)
-            .scalar()
-            or 0
-        )
-
-        # Attendance stats for this subject
-        sub_total = (
-            db.query(func.count(Attendance.id))
-            .filter(Attendance.subject_id == subject.id)
-            .scalar()
-            or 0
-        )
-        sub_present = (
-            db.query(func.count(Attendance.id))
-            .filter(Attendance.subject_id == subject.id, Attendance.status == "present")
-            .scalar()
-            or 0
-        )
+        enrolled_count = enrolled_counts.get(subject.id, 0)
+        sub_total, sub_present = att_stats_by_subj.get(subject.id, (0, 0))
         sub_absent = sub_total - sub_present
         sub_percentage = round((sub_present / sub_total * 100), 1) if sub_total > 0 else 0.0
 
@@ -491,7 +561,7 @@ def get_lecturer_dashboard_data(current_user: User, db: Session) -> dict:
         else 0.0
     )
 
-    # 5. Recent activity (last 10 attendance records in the lecturer's subjects)
+    # 6. Recent activity (last 10 attendance records in the lecturer's subjects)
     recent_records = (
         db.query(Attendance)
         .filter(Attendance.subject_id.in_(assigned_subject_ids))
@@ -500,10 +570,15 @@ def get_lecturer_dashboard_data(current_user: User, db: Session) -> dict:
         .all()
     )
 
+    recent_student_ids = {r.student_id for r in recent_records}
+    recent_subject_ids = {r.subject_id for r in recent_records}
+    student_map = {u.id: u for u in db.query(User).filter(User.id.in_(recent_student_ids)).all()} if recent_student_ids else {}
+    subj_map = {s.id: s for s in db.query(Subject).filter(Subject.id.in_(recent_subject_ids)).all()} if recent_subject_ids else {}
+
     recent_activity = []
     for r in recent_records:
-        student = db.query(User).filter(User.id == r.student_id).first()
-        subj = db.query(Subject).filter(Subject.id == r.subject_id).first()
+        student = student_map.get(r.student_id)
+        subj = subj_map.get(r.subject_id)
         att_date_str = (
             r.attendance_date.isoformat()
             if hasattr(r.attendance_date, "isoformat")
