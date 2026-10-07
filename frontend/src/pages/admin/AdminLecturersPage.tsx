@@ -259,14 +259,27 @@ export default function AdminLecturersPage() {
     setFormLoading(true);
     const targetEmail = formData.email.trim().toLowerCase();
     try {
-      await api.post('/api/admin/lecturers', {
+      const res = await api.post('/api/admin/lecturers', {
         employee_id: formData.employee_id.trim(),
         full_name: formData.full_name.trim(),
         email: targetEmail,
         department: formData.department.trim(),
       });
 
-      toast.success(`Account created successfully. Activation email sent to: ${targetEmail}`);
+      const emailDelivery = res.data?.email_delivery;
+      if (emailDelivery) {
+        if (emailDelivery.success) {
+          toast.success('Lecturer account created and invitation email accepted by the email provider.');
+        } else {
+          toast.error(
+            `Lecturer account created, but the invitation email could not be sent: ${emailDelivery.message || 'Delivery failed'}. Please retry using Resend Invite.`,
+            { duration: 6000 }
+          );
+        }
+      } else {
+        toast.success(`Account created successfully for ${targetEmail}.`);
+      }
+
       setShowAddModal(false);
       fetchLecturers(true);
       fetchSummary();
@@ -291,8 +304,16 @@ export default function AdminLecturersPage() {
   // Handle Resend Activation Email
   const handleResendActivation = async (lecturer: LecturerListItem) => {
     try {
-      await api.post(`/api/admin/lecturers/${lecturer.id}/resend-activation`);
-      toast.success(`Activation email resent successfully to: ${lecturer.email}`);
+      const res = await api.post(`/api/admin/lecturers/${lecturer.id}/resend-activation`);
+      const emailDelivery = res.data?.email_delivery;
+      if (emailDelivery && !emailDelivery.success) {
+        toast.error(
+          `Could not send activation email: ${emailDelivery.message || 'Provider rejected request'}.`,
+          { duration: 5000 }
+        );
+      } else {
+        toast.success(`Invitation email accepted by the email provider for: ${lecturer.email}`);
+      }
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Failed to resend activation email.');
     }

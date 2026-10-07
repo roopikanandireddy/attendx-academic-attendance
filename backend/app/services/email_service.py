@@ -2,15 +2,54 @@
 AttendX — Email Service Abstraction
 Handles institutional transactional emails including account activation,
 password reset, and security notifications.
+Integrates with Module 8 observability and provides granular error classification.
 """
+import os
 import smtplib
+import socket
 import logging
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional, List, Dict, Any
 from app.core.config import get_settings
+from app.core.observability import log_structured_event
 
 logger = logging.getLogger("attendx.email")
+
+
+class EmailDeliveryResult:
+    """
+    Structured outcome of an email dispatch operation.
+    Implements __bool__ for backwards compatibility with boolean checks.
+    """
+    def __init__(
+        self,
+        success: bool,
+        status: str,
+        error_code: Optional[str] = None,
+        message: str = "",
+        details: Optional[Dict[str, Any]] = None,
+    ):
+        self.success = success
+        self.status = status  # "ACCEPTED", "FAILED", "LOCAL_RECORDED"
+        self.error_code = error_code  # e.g. "EMAIL_CONFIGURATION_ERROR", "EMAIL_PROVIDER_AUTH_ERROR"
+        self.message = message
+        self.details = details or {}
+
+    def __bool__(self) -> bool:
+        return self.success
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "success": self.success,
+            "status": self.status,
+            "error_code": self.error_code,
+            "message": self.message,
+        }
+
+    def __repr__(self) -> str:
+        return f"<EmailDeliveryResult success={self.success} status='{self.status}' error_code={self.error_code}>"
 
 
 class EmailService:
@@ -20,8 +59,18 @@ class EmailService:
     def __init__(self):
         self.settings = get_settings()
 
-    def _send_smtp(self, to_email: str, subject: str, text_content: str, html_content: str) -> bool:
-        """Deliver email via configured SMTP server."""
+    def _send_smtp(self, to_email: str, subject: str, text_content: str, html_content: str) -> EmailDeliveryResult:
+        """Deliver email via configured SMTP server with classified error handling and zero credential leakage."""
+        if not self.settings.EMAIL_HOST:
+            logger.warning("SMTP delivery skipped: EMAIL_HOST is not configured.")
+            return EmailDeliveryResult(
+                success=False,
+                status="FAILED",
+                error_code="EMAIL_CONFIGURATION_ERROR",
+                message="SMTP host (EMAIL_HOST or SMTP_HOST) is not configured.",
+            )
+
+        start_time = time.perf_counter()
         try:
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
@@ -33,14 +82,11 @@ class EmailService:
             msg.attach(part1)
             msg.attach(part2)
 
-            if not self.settings.EMAIL_HOST:
-                logger.warning("SMTP delivery skipped: EMAIL_HOST is not configured.")
-                return False
-
-            if self.settings.EMAIL_PORT == 465:
-                server = smtplib.SMTP_SSL(self.settings.EMAIL_HOST, self.settings.EMAIL_PORT, timeout=10)
+            port = self.settings.EMAIL_PORT or 587
+            if port == 465:
+                server = smtplib.SMTP_SSL(self.settings.EMAIL_HOST, port, timeout=10)
             else:
-                server = smtplib.SMTP(self.settings.EMAIL_HOST, self.settings.EMAIL_PORT, timeout=10)
+                server = smtplib.SMTP(self.settings.EMAIL_HOST, port, timeout=10)
                 if self.settings.EMAIL_USE_TLS:
                     server.starttls()
 
@@ -49,11 +95,81 @@ class EmailService:
 
             server.sendmail(self.settings.EMAIL_FROM, [to_email], msg.as_string())
             server.quit()
-            logger.info("Successfully delivered email to recipient.")
-            return True
+
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            logger.info("Successfully delivered email via SMTP to recipient.")
+            return EmailDeliveryResult(
+                success=True,
+                status="ACCEPTED",
+                message="Invitation email accepted by the email provider.",
+                details={"duration_ms": duration_ms},
+            )
+
+        except smtplib.SMTPAuthenticationError:
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            logger.error("SMTP authentication failed. Verify username and password/API key.")
+            return EmailDeliveryResult(
+                success=False,
+                status="FAILED",
+                error_code="EMAIL_PROVIDER_AUTH_ERROR",
+                message="Email provider authentication failed. Check SMTP credentials.",
+                details={"duration_ms": duration_ms},
+            )
+
+        except smtplib.SMTPRecipientsRefused:
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            logger.error("SMTP recipient address refused by provider.")
+            return EmailDeliveryResult(
+                success=False,
+                status="FAILED",
+                error_code="INVALID_RECIPIENT",
+                message="Recipient email address was refused by the email provider.",
+                details={"duration_ms": duration_ms},
+            )
+
+        except (smtplib.SMTPSenderRefused, smtplib.SMTPDataError):
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            logger.error("SMTP message or sender rejected by provider.")
+            return EmailDeliveryResult(
+                success=False,
+                status="FAILED",
+                error_code="EMAIL_PROVIDER_REJECTED",
+                message="Invitation email was rejected by the email provider.",
+                details={"duration_ms": duration_ms},
+            )
+
+        except (socket.timeout, TimeoutError):
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            logger.error("SMTP connection timed out after 10s.")
+            return EmailDeliveryResult(
+                success=False,
+                status="FAILED",
+                error_code="EMAIL_PROVIDER_TIMEOUT",
+                message="Email provider timed out. Please retry.",
+                details={"duration_ms": duration_ms},
+            )
+
+        except (smtplib.SMTPConnectError, ConnectionRefusedError, OSError) as e:
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            logger.error("SMTP network connection failure: %s", type(e).__name__)
+            return EmailDeliveryResult(
+                success=False,
+                status="FAILED",
+                error_code="NETWORK_ERROR",
+                message="Unable to connect to email provider. Network or host unreachable.",
+                details={"duration_ms": duration_ms},
+            )
+
         except Exception as e:
-            logger.error("Failed to send email via SMTP: %s", str(e))
-            return False
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            logger.error("SMTP delivery encountered unexpected error: %s", type(e).__name__)
+            return EmailDeliveryResult(
+                success=False,
+                status="FAILED",
+                error_code="UNKNOWN_EMAIL_ERROR",
+                message="Email delivery failed due to an unexpected provider error.",
+                details={"duration_ms": duration_ms},
+            )
 
     def send_account_activation_email(
         self,
@@ -61,14 +177,24 @@ class EmailService:
         full_name: str,
         activation_token: str,
         role: str = "Student",
-    ) -> bool:
+    ) -> EmailDeliveryResult:
         """
-        Send a secure account activation link to a newly provisioned student or faculty member.
-        Does not include passwords or database keys.
+        Send a secure account activation link to a newly provisioned student or lecturer.
+        Sanitizes frontend activation URLs, records telemetry, and emits Module 8 structured events.
         """
-        activation_url = f"{self.settings.FRONTEND_URL}/activate-account?token={activation_token}"
+        frontend_base = (self.settings.FRONTEND_URL or "http://localhost:5173").strip().rstrip("/")
+        activation_url = f"{frontend_base}/activate-account?token={activation_token}"
         expires_hours = self.settings.ACCOUNT_ACTIVATION_TOKEN_EXPIRE_HOURS
         subject = "Activate your AttendX account"
+
+        # Module 8 Observability: log invitation attempt
+        log_structured_event(
+            event="invitation_email_attempt",
+            level="INFO",
+            role=role.lower(),
+            category="EMAIL_ATTEMPT",
+            details={"to": to_email},
+        )
 
         # Plaintext format
         text_content = (
@@ -134,20 +260,61 @@ class EmailService:
             "role": role,
         })
 
-        if self.settings.EMAIL_PROVIDER == "smtp" and self.settings.EMAIL_HOST:
-            return self._send_smtp(to_email, subject, text_content, html_content)
+        is_production = os.getenv("RENDER") == "true" or os.getenv("ENVIRONMENT") == "production"
+
+        if self.settings.EMAIL_PROVIDER == "smtp":
+            delivery_result = self._send_smtp(to_email, subject, text_content, html_content)
+        elif is_production:
+            logger.error(
+                "Production email delivery failed: EMAIL_PROVIDER is '%s' and SMTP is not configured.",
+                self.settings.EMAIL_PROVIDER,
+            )
+            delivery_result = EmailDeliveryResult(
+                success=False,
+                status="FAILED",
+                error_code="EMAIL_CONFIGURATION_ERROR",
+                message="Production email service is not configured. Set EMAIL_PROVIDER=smtp and EMAIL_HOST in environment.",
+            )
         else:
-            logger.info("Account activation email queued for: %s (Provider: %s)", to_email, self.settings.EMAIL_PROVIDER)
-            return True
+            logger.info("Account activation email recorded for: %s (Provider: %s)", to_email, self.settings.EMAIL_PROVIDER)
+            delivery_result = EmailDeliveryResult(
+                success=True,
+                status="ACCEPTED",
+                message="Invitation email accepted by local console provider.",
+            )
+
+        # Module 8 Observability: log delivery result
+        if delivery_result.success:
+            log_structured_event(
+                event="invitation_email_accepted",
+                level="INFO",
+                role=role.lower(),
+                category="EMAIL_ACCEPTED",
+                duration_ms=delivery_result.details.get("duration_ms"),
+                details={"to": to_email, "status": delivery_result.status},
+            )
+        else:
+            log_structured_event(
+                event="invitation_email_failed",
+                level="ERROR",
+                role=role.lower(),
+                category=delivery_result.error_code or "EMAIL_ERROR",
+                error_code=delivery_result.error_code,
+                duration_ms=delivery_result.details.get("duration_ms"),
+                details={"to": to_email, "reason": delivery_result.message},
+            )
+
+        return delivery_result
 
     def send_password_reset_email(
         self,
         to_email: str,
         full_name: str,
         reset_token: str,
-    ) -> bool:
+    ) -> EmailDeliveryResult:
         """Send a secure password reset link to an existing active account."""
-        reset_url = f"{self.settings.FRONTEND_URL}/reset-password?token={reset_token}"
+        frontend_base = (self.settings.FRONTEND_URL or "http://localhost:5173").strip().rstrip("/")
+        reset_url = f"{frontend_base}/reset-password?token={reset_token}"
         expires_hours = self.settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS
         subject = "Reset your AttendX password"
 
@@ -211,11 +378,24 @@ class EmailService:
             "reset_token": reset_token,
         })
 
-        if self.settings.EMAIL_PROVIDER == "smtp" and self.settings.EMAIL_HOST:
+        is_production = os.getenv("RENDER") == "true" or os.getenv("ENVIRONMENT") == "production"
+
+        if self.settings.EMAIL_PROVIDER == "smtp":
             return self._send_smtp(to_email, subject, text_content, html_content)
+        elif is_production:
+            return EmailDeliveryResult(
+                success=False,
+                status="FAILED",
+                error_code="EMAIL_CONFIGURATION_ERROR",
+                message="Production email service is not configured. Set EMAIL_PROVIDER=smtp and EMAIL_HOST in environment.",
+            )
         else:
-            logger.info("Password reset email queued for: %s (Provider: %s)", to_email, self.settings.EMAIL_PROVIDER)
-            return True
+            logger.info("Password reset email recorded for: %s (Provider: %s)", to_email, self.settings.EMAIL_PROVIDER)
+            return EmailDeliveryResult(
+                success=True,
+                status="ACCEPTED",
+                message="Password reset email accepted by local console provider.",
+            )
 
     def send_security_notification(
         self,
@@ -224,7 +404,7 @@ class EmailService:
         action: str = "",
         details: str = "",
         message: str = "",
-    ) -> bool:
+    ) -> EmailDeliveryResult:
         """Send account security notification (e.g. account activated, password changed)."""
         msg_body = message or (f"{action}: {details}" if action else "A security event occurred on your account.")
         subject = f"AttendX Security Notification{f' — {action}' if action else ''}"
@@ -252,9 +432,13 @@ class EmailService:
             "action": action,
             "details": details,
         })
-        if self.settings.EMAIL_PROVIDER == "smtp" and self.settings.EMAIL_HOST:
+        if self.settings.EMAIL_PROVIDER == "smtp":
             return self._send_smtp(to_email, subject, text_content, html_content)
-        return True
+        return EmailDeliveryResult(
+            success=True,
+            status="ACCEPTED",
+            message="Security notification dispatched.",
+        )
 
     def get_sent_emails(self) -> List[Dict[str, Any]]:
         """Return shallow copy of recorded emails sent during process lifecycle."""

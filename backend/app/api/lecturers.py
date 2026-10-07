@@ -39,6 +39,7 @@ from app.api.dashboard import get_lecturer_dashboard_data
 import uuid
 from app.services.token_service import create_activation_token
 from app.services.email_service import email_service
+from app.core.observability import log_structured_event
 
 router = APIRouter(prefix="/api/lecturers", tags=["Lecturers"])
 admin_router = APIRouter(prefix="/api/admin/lecturers", tags=["Admin Lecturers"])
@@ -218,21 +219,37 @@ def create_lecturer_record(db: Session, data: AdminCreateLecturer) -> dict:
     db.refresh(lecturer)
 
     if is_invited:
+        log_structured_event(
+            event="invitation_created",
+            level="INFO",
+            role="lecturer",
+            category="INVITATION",
+            details={"email": lecturer.email, "employee_id": lecturer.employee_id},
+        )
         raw_token, _ = create_activation_token(db, lecturer)
-        email_service.send_account_activation_email(
+        log_structured_event(
+            event="activation_token_created",
+            level="INFO",
+            role="lecturer",
+            category="TOKEN_GENERATED",
+            details={"email": lecturer.email},
+        )
+        email_result = email_service.send_account_activation_email(
             to_email=lecturer.email,
             full_name=lecturer.full_name,
             activation_token=raw_token,
             role="Lecturer",
         )
+        email_delivery_info = email_result.to_dict()
     else:
         create_faculty_welcome_notification(
             db=db,
             user_id=lecturer.id,
             full_name=lecturer.full_name,
         )
+        email_delivery_info = None
 
-    return {
+    response_data = {
         "id": lecturer.id,
         "employee_id": lecturer.employee_id,
         "full_name": lecturer.full_name,
@@ -246,6 +263,10 @@ def create_lecturer_record(db: Session, data: AdminCreateLecturer) -> dict:
         "created_at": lecturer.created_at.isoformat() if lecturer.created_at else None,
         "updated_at": lecturer.updated_at.isoformat() if lecturer.updated_at else None,
     }
+    if email_delivery_info:
+        response_data["email_delivery"] = email_delivery_info
+
+    return response_data
 
 
 def update_lecturer_record(db: Session, lecturer_id: str, data: AdminUpdateLecturer) -> dict:
@@ -339,15 +360,28 @@ def resend_lecturer_activation(db: Session, lecturer_id: str) -> dict:
         )
 
     raw_token, _ = create_activation_token(db, lecturer)
-    email_service.send_account_activation_email(
+    log_structured_event(
+        event="activation_token_created",
+        level="INFO",
+        role="lecturer",
+        category="TOKEN_GENERATED",
+        details={"email": lecturer.email, "action": "resend"},
+    )
+    email_result = email_service.send_account_activation_email(
         to_email=lecturer.email,
         full_name=lecturer.full_name,
         activation_token=raw_token,
         role="Lecturer",
     )
+    msg = (
+        f"Activation email accepted by provider for {lecturer.email}"
+        if email_result.success
+        else f"Failed to send activation email to {lecturer.email}: {email_result.message}"
+    )
     return {
-        "message": f"Activation email resent successfully to {lecturer.email}",
+        "message": msg,
         "email": lecturer.email,
+        "email_delivery": email_result.to_dict(),
     }
 
 

@@ -25,6 +25,22 @@ services:
         value: 1440
       - key: FRONTEND_URL
         sync: false
+      - key: EMAIL_PROVIDER
+        value: smtp
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USERNAME
+        sync: false
+      - key: EMAIL_PASSWORD
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_FROM_NAME
+        value: "AttendX Administration"
+      - key: EMAIL_USE_TLS
+        value: "true"
 
   # Frontend SPA service (React + Vite)
   - type: web

@@ -27,6 +27,7 @@ from app.services.notification_service import (
     create_welcome_notification,
     create_faculty_welcome_notification,
 )
+from app.core.observability import log_structured_event
 
 # Precomputed dummy bcrypt hash with 12 rounds for timing attack equalization
 DUMMY_BCRYPT_HASH = "$2b$12$6zP1dMsjuljG4BF9bWGAiOdFwbBUwoGd9SxSSvp7Rdlx4qy5uRvvi"
@@ -158,6 +159,14 @@ def activate_account(
         full_name=user.full_name,
         action="Account Activated",
         details="Your AttendX account password was set and your account is now active.",
+    )
+
+    log_structured_event(
+        event="activation_completed",
+        level="INFO",
+        role=user.role,
+        category="ACTIVATION_COMPLETED",
+        details={"email": user.email},
     )
 
     return {

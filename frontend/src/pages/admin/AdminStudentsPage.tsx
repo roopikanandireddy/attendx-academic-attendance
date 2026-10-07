@@ -271,7 +271,7 @@ export default function AdminStudentsPage() {
     setFormLoading(true);
     const targetEmail = formData.email.trim().toLowerCase();
     try {
-      await api.post('/api/admin/students', {
+      const res = await api.post('/api/admin/students', {
         student_id: formData.student_id.trim(),
         full_name: formData.full_name.trim(),
         email: targetEmail,
@@ -280,7 +280,20 @@ export default function AdminStudentsPage() {
         section: formData.section.trim().toUpperCase(),
       });
 
-      toast.success(`Account created successfully. Activation email sent to: ${targetEmail}`);
+      const emailDelivery = res.data?.email_delivery;
+      if (emailDelivery) {
+        if (emailDelivery.success) {
+          toast.success('Student account created and invitation email accepted by the email provider.');
+        } else {
+          toast.error(
+            `Student account created, but the invitation email could not be sent: ${emailDelivery.message || 'Delivery failed'}. Please retry using Resend Invite.`,
+            { duration: 6000 }
+          );
+        }
+      } else {
+        toast.success(`Account created successfully for ${targetEmail}.`);
+      }
+
       setShowAddModal(false);
       fetchStudents();
       fetchSummary();
@@ -295,8 +308,16 @@ export default function AdminStudentsPage() {
   // Handle Resend Activation Email
   const handleResendActivation = async (student: StudentListItem) => {
     try {
-      await api.post(`/api/admin/students/${student.id}/resend-activation`);
-      toast.success(`Activation email resent successfully to: ${student.email}`);
+      const res = await api.post(`/api/admin/students/${student.id}/resend-activation`);
+      const emailDelivery = res.data?.email_delivery;
+      if (emailDelivery && !emailDelivery.success) {
+        toast.error(
+          `Could not send activation email: ${emailDelivery.message || 'Provider rejected request'}.`,
+          { duration: 5000 }
+        );
+      } else {
+        toast.success(`Invitation email accepted by the email provider for: ${student.email}`);
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Failed to resend activation email.');
     }

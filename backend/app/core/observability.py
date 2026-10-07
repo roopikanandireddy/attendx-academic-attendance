@@ -13,7 +13,7 @@ import time
 import uuid
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import Optional, Callable
+from typing import Optional, Callable, Dict, Any
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -124,6 +124,61 @@ def log_structured_request(
     }
     if error_detail:
         payload["error_type"] = error_detail
+
+    log_line = json.dumps(payload, separators=(",", ":"))
+    if level == "ERROR":
+        logger.error(log_line)
+    elif level == "WARNING":
+        logger.warning(log_line)
+    else:
+        logger.info(log_line)
+
+
+def log_structured_event(
+    event: str,
+    level: str = "INFO",
+    role: Optional[str] = None,
+    category: Optional[str] = None,
+    duration_ms: Optional[float] = None,
+    error_code: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    """
+    Emit a structured domain event log entry (e.g. invitation, activation)
+    through the existing Module 8 structured logging system without exposing secrets.
+    """
+    settings = get_settings()
+    if not getattr(settings, "ENABLE_STRUCTURED_LOGGING", True):
+        return
+
+    req_id = get_current_request_id() or ""
+    payload: Dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "level": level,
+        "event": event,
+        "request_id": req_id,
+    }
+    if role:
+        payload["role"] = role
+    if category:
+        payload["category"] = category
+    if duration_ms is not None:
+        payload["duration_ms"] = round(duration_ms, 2)
+    if error_code:
+        payload["error_code"] = error_code
+    if details:
+        # Strictly sanitize: exclude any credential or token keys
+        prohibited_keys = {
+            "password", "password_hash", "token", "activation_token",
+            "reset_token", "jwt", "api_key", "secret", "authorization",
+            "smtp_password", "key",
+        }
+        safe_details = {
+            k: v for k, v in details.items()
+            if k.lower() not in prohibited_keys
+        }
+        if safe_details:
+            payload["details"] = safe_details
 
     log_line = json.dumps(payload, separators=(",", ":"))
     if level == "ERROR":

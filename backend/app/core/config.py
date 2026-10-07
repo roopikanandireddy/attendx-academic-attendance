@@ -1,4 +1,5 @@
 import os
+from typing import Any
 from pydantic_settings import BaseSettings
 from pydantic import model_validator
 from functools import lru_cache
@@ -38,8 +39,32 @@ class Settings(BaseSettings):
     SLOW_REQUEST_THRESHOLD_MS: float = 1000.0
     ENABLE_STRUCTURED_LOGGING: bool = True
 
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_email_env_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Resolve common SMTP_* environment variable aliases
+            if not data.get("EMAIL_HOST") and data.get("SMTP_HOST"):
+                data["EMAIL_HOST"] = data["SMTP_HOST"]
+            if not data.get("EMAIL_PORT") and data.get("SMTP_PORT"):
+                data["EMAIL_PORT"] = data["SMTP_PORT"]
+            if not data.get("EMAIL_USERNAME") and (data.get("SMTP_USER") or data.get("SMTP_USERNAME")):
+                data["EMAIL_USERNAME"] = data.get("SMTP_USER") or data.get("SMTP_USERNAME")
+            if not data.get("EMAIL_PASSWORD") and (data.get("SMTP_PASSWORD") or data.get("SMTP_PASS")):
+                data["EMAIL_PASSWORD"] = data.get("SMTP_PASSWORD") or data.get("SMTP_PASS")
+            if not data.get("EMAIL_FROM") and data.get("SMTP_FROM"):
+                data["EMAIL_FROM"] = data["SMTP_FROM"]
+            # If SMTP_HOST is provided but EMAIL_PROVIDER was not specified, default to smtp
+            if data.get("EMAIL_HOST") and not data.get("EMAIL_PROVIDER"):
+                data["EMAIL_PROVIDER"] = "smtp"
+        return data
+
     @model_validator(mode="after")
     def validate_production_secrets(self):
+        # Sanitize FRONTEND_URL trailing slashes
+        if self.FRONTEND_URL:
+            self.FRONTEND_URL = self.FRONTEND_URL.strip().rstrip("/")
+
         is_production = os.getenv("RENDER") == "true" or os.getenv("ENVIRONMENT") == "production"
         if is_production:
             if (

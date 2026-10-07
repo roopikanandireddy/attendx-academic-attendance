@@ -605,6 +605,9 @@ export interface LecturerSubjectReportResponse {
   sessions: LecturerSubjectDailySession[];
 }
 
-
-
-
+export interface EmailDeliveryInfo {
+  success: boolean;
+  status: string;
+  error_code?: string | null;
+  message: string;
+}

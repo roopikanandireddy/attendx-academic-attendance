@@ -18,6 +18,7 @@ from app.schemas.user import (
 import uuid
 from app.services.token_service import create_activation_token
 from app.services.email_service import email_service
+from app.core.observability import log_structured_event
 
 router = APIRouter(prefix="/api/students", tags=["Students"])
 admin_router = APIRouter(prefix="/api/admin/students", tags=["Admin Students"])
@@ -256,18 +257,34 @@ def create_student_record(db: Session, data: AdminCreateStudent) -> dict:
     db.refresh(student)
 
     if is_invited:
+        log_structured_event(
+            event="invitation_created",
+            level="INFO",
+            role="student",
+            category="INVITATION",
+            details={"email": student.email, "student_id": student.student_id},
+        )
         raw_token, _ = create_activation_token(db, student)
-        email_service.send_account_activation_email(
+        log_structured_event(
+            event="activation_token_created",
+            level="INFO",
+            role="student",
+            category="TOKEN_GENERATED",
+            details={"email": student.email},
+        )
+        email_result = email_service.send_account_activation_email(
             to_email=student.email,
             full_name=student.full_name,
             activation_token=raw_token,
             role="Student",
         )
+        email_delivery_info = email_result.to_dict()
     else:
         from app.services.notification_service import create_welcome_notification
         create_welcome_notification(db=db, user_id=student.id)
+        email_delivery_info = None
 
-    return {
+    response_data = {
         "id": student.id,
         "student_id": student.student_id,
         "full_name": student.full_name,
@@ -282,6 +299,10 @@ def create_student_record(db: Session, data: AdminCreateStudent) -> dict:
         "created_at": student.created_at.isoformat() if student.created_at else None,
         "updated_at": student.updated_at.isoformat() if student.updated_at else None,
     }
+    if email_delivery_info:
+        response_data["email_delivery"] = email_delivery_info
+
+    return response_data
 
 
 def update_student_record(db: Session, student_id: str, data: AdminUpdateStudent) -> dict:
@@ -379,15 +400,28 @@ def resend_student_activation_email(db: Session, student_id: str) -> dict:
         )
 
     raw_token, _ = create_activation_token(db, student)
-    email_service.send_account_activation_email(
+    log_structured_event(
+        event="activation_token_created",
+        level="INFO",
+        role="student",
+        category="TOKEN_GENERATED",
+        details={"email": student.email, "action": "resend"},
+    )
+    email_result = email_service.send_account_activation_email(
         to_email=student.email,
         full_name=student.full_name,
         activation_token=raw_token,
         role="Student",
     )
+    msg = (
+        f"Activation email accepted by provider for {student.email}"
+        if email_result.success
+        else f"Failed to send activation email to {student.email}: {email_result.message}"
+    )
     return {
-        "message": f"Activation email resent successfully to {student.email}",
+        "message": msg,
         "email": student.email,
+        "email_delivery": email_result.to_dict(),
     }
 
 
