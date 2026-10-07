@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://attendx-web-721g.onrender.com/sitemap.xml

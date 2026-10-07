@@ -128,7 +128,7 @@ export default function RoleSelectionPage() {
           </div>
 
           {/* Institutional Status & Secondary Link */}
-          <div className="flex items-center gap-3 sm:gap-4">
+          <nav aria-label="Portal Navigation" className="flex items-center gap-3 sm:gap-4">
             <div className="hidden md:flex items-center gap-2 text-xs text-surface-500 font-medium bg-surface-50 px-3 py-1.5 rounded-lg border border-surface-200/80">
               <Building2 className="w-3.5 h-3.5 text-surface-400" aria-hidden="true" />
               <span>Academic Year 2026–2027</span>
@@ -143,7 +143,7 @@ export default function RoleSelectionPage() {
             >
               Direct Sign In
             </Link>
-          </div>
+          </nav>
         </div>
       </header>
 
@@ -156,13 +156,13 @@ export default function RoleSelectionPage() {
             <span>Academic Attendance Management System</span>
           </div>
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-surface-900 tracking-tight leading-tight">
-            Welcome to AttendX
+            AttendX — Academic Attendance Management System
           </h1>
-          <p className="mt-3 text-lg sm:text-xl text-surface-600 font-normal">
-            Select your role to continue
+          <p className="mt-3 text-lg sm:text-xl text-surface-600 font-medium">
+            Unified Attendance Tracking for Students, Lecturers, and Administrators
           </p>
-          <p className="mt-2 text-sm text-surface-500 max-w-xl mx-auto">
-            Please select your institutional account type below to access your role-specific academic attendance workspace.
+          <p className="mt-2 text-sm text-surface-500 max-w-2xl mx-auto">
+            AttendX provides automated attendance recording, course enrollment tracking, 75% attendance threshold monitoring, and comprehensive institutional reporting with secure role-based access. Select your institutional portal below to continue.
           </p>
         </section>
 
