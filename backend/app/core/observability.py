@@ -87,7 +87,7 @@ def get_normalized_route(request: Request) -> str:
     route = request.scope.get("route")
     if route and hasattr(route, "path") and route.path:
         return str(route.path)
-    return str(request.url.path)
+    return request.url.path
 
 
 def log_structured_request(
@@ -276,6 +276,7 @@ class RequestTimingMiddleware(BaseHTTPMiddleware):
             request_id_ctx.reset(req_token)
             db_duration_ctx.reset(db_token)
 
+        assert response is not None
         return response
 
 

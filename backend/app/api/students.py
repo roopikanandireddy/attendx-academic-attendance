@@ -284,7 +284,7 @@ def create_student_record(db: Session, data: AdminCreateStudent) -> dict:
         create_welcome_notification(db=db, user_id=student.id)
         email_delivery_info = None
 
-    response_data = {
+    response_data: dict[str, Any] = {
         "id": student.id,
         "student_id": student.student_id,
         "full_name": student.full_name,

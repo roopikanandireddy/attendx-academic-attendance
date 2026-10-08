@@ -156,12 +156,13 @@ def get_admin_dashboard_data(current_user: User, db: Session) -> dict:
     today = date.today()
 
     # 1. Total counts by role in 1 query
-    role_counts = dict(
-        db.query(User.role, func.count(User.id))
+    role_counts = {
+        role: count
+        for role, count in db.query(User.role, func.count(User.id))
         .filter(User.role.in_(["student", "lecturer"]))
         .group_by(User.role)
         .all()
-    )
+    }
     total_students = role_counts.get("student", 0)
     total_lecturers = role_counts.get("lecturer", 0)
 
@@ -506,12 +507,13 @@ def get_lecturer_dashboard_data(current_user: User, db: Session) -> dict:
     )
 
     # 4. Batch query enrolled students count grouped by subject_id
-    enrolled_counts = dict(
-        db.query(StudentSubject.subject_id, func.count(StudentSubject.id))
+    enrolled_counts = {
+        subject_id: count
+        for subject_id, count in db.query(StudentSubject.subject_id, func.count(StudentSubject.id))
         .filter(StudentSubject.subject_id.in_(assigned_subject_ids))
         .group_by(StudentSubject.subject_id)
         .all()
-    )
+    }
 
     # 5. Batch query attendance stats grouped by subject_id
     att_stats_by_subj = {
